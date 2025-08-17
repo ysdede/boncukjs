@@ -1,0 +1,261 @@
+{
+  "$defs": {
+    "TranscriptionMetrics": {
+      "description": "Aggregated metrics for an utterance, providing insights into the overall transcription quality.",
+      "properties": {
+        "overall_log_probability": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Overall log-probability score for the utterance from the ASR model. Higher is generally better. May not be provided by all models.",
+          "examples": [
+            -5.32
+          ],
+          "title": "Overall Log Probability"
+        },
+        "average_frame_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Average confidence score across all acoustic frames in the utterance (0.0 to 1.0).",
+          "examples": [
+            0.92
+          ],
+          "title": "Average Frame Confidence"
+        },
+        "average_token_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Average confidence score across all predicted tokens (sub-word units) in the utterance (0.0 to 1.0).",
+          "examples": [
+            0.94
+          ],
+          "title": "Average Token Confidence"
+        },
+        "average_word_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Average confidence score across all recognized words in the utterance (0.0 to 1.0).",
+          "examples": [
+            0.91
+          ],
+          "title": "Average Word Confidence"
+        }
+      },
+      "title": "TranscriptionMetrics",
+      "type": "object"
+    },
+    "WordDetail": {
+      "description": "Represents a single transcribed word with its timing and confidence.",
+      "properties": {
+        "text": {
+          "description": "The transcribed word.",
+          "examples": [
+            "hello"
+          ],
+          "title": "Text",
+          "type": "string"
+        },
+        "start_time": {
+          "description": "Start time of the word in seconds from the beginning of the audio.",
+          "examples": [
+            0.5
+          ],
+          "title": "Start Time",
+          "type": "number"
+        },
+        "end_time": {
+          "description": "End time of the word in seconds from the beginning of the audio.",
+          "examples": [
+            0.9
+          ],
+          "title": "End Time",
+          "type": "number"
+        },
+        "confidence": {
+          "description": "Confidence score for the word (0.0 to 1.0).",
+          "examples": [
+            0.95
+          ],
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "text",
+        "start_time",
+        "end_time",
+        "confidence"
+      ],
+      "title": "WordDetail",
+      "type": "object"
+    }
+  },
+  "description": "Defines the structure of the WebSocket message sent from the server\nto the client containing transcription results from the Parakeet ASR model.",
+  "examples": [
+    {
+      "client_timestamp": 1678886400.5,
+      "is_final": true,
+      "metrics": {
+        "average_frame_confidence": 0.9984,
+        "average_token_confidence": 0.9983,
+        "average_word_confidence": 0.9813,
+        "overall_log_probability": -10.5
+      },
+      "sequence_num": 1,
+      "session_id": "some-unique-session-id-example",
+      "utterance_text": "In the long history of the world",
+      "words": [
+        {
+          "confidence": 0.9657,
+          "end_time": 0.32,
+          "start_time": 0.0,
+          "text": "In"
+        },
+        {
+          "confidence": 1.0,
+          "end_time": 0.64,
+          "start_time": 0.32,
+          "text": "the"
+        },
+        {
+          "confidence": 1.0,
+          "end_time": 0.88,
+          "start_time": 0.64,
+          "text": "long"
+        },
+        {
+          "confidence": 1.0,
+          "end_time": 1.6,
+          "start_time": 0.88,
+          "text": "history"
+        },
+        {
+          "confidence": 1.0,
+          "end_time": 1.84,
+          "start_time": 1.6,
+          "text": "of"
+        },
+        {
+          "confidence": 1.0,
+          "end_time": 2.08,
+          "start_time": 1.84,
+          "text": "the"
+        },
+        {
+          "confidence": 0.9252,
+          "end_time": 2.4,
+          "start_time": 2.08,
+          "text": "world"
+        }
+      ]
+    }
+  ],
+  "properties": {
+    "utterance_text": {
+      "description": "The full transcribed text of the current utterance or segment.",
+      "examples": [
+        "hello world this is a test"
+      ],
+      "title": "Utterance Text",
+      "type": "string"
+    },
+    "words": {
+      "description": "A list of individual words, each with its detailed timing and confidence.",
+      "items": {
+        "$ref": "#/$defs/WordDetail"
+      },
+      "title": "Words",
+      "type": "array"
+    },
+    "metrics": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TranscriptionMetrics"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional aggregated confidence metrics for the entire utterance."
+    },
+    "is_final": {
+      "description": "Boolean flag indicating if this is the final transcription result for a given audio chunk or interaction. 'true' means the ASR has finalized this part; 'false' could indicate an interim result (though Parakeet might typically send final chunks).",
+      "examples": [
+        true
+      ],
+      "title": "Is Final",
+      "type": "boolean"
+    },
+    "session_id": {
+      "description": "The unique ID for the transcription session, typically originating from the client.",
+      "examples": [
+        "some-unique-session-id"
+      ],
+      "title": "Session Id",
+      "type": "string"
+    },
+    "sequence_num": {
+      "description": "A sequential number for this specific message/chunk, typically originating from the client.",
+      "examples": [
+        1,
+        2,
+        3
+      ],
+      "title": "Sequence Num",
+      "type": "integer"
+    },
+    "client_timestamp": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional timestamp (e.g., audio chunk start time) sent by the client with the audio chunk, in seconds.",
+      "examples": [
+        1678886400.5
+      ],
+      "title": "Client Timestamp"
+    }
+  },
+  "required": [
+    "utterance_text",
+    "words",
+    "is_final",
+    "session_id",
+    "sequence_num"
+  ],
+  "title": "ParakeetTranscriptionPayload",
+  "type": "object"
+}

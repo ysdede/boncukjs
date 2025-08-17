@@ -1,0 +1,94 @@
+.energy-meter {
+    position: relative;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-panel);
+    overflow: hidden;
+  }
+  
+  .vertical {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-start;
+  }
+  
+  .horizontal {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+  }
+  
+  .meter-background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+      var(--vertical, to top),
+      var(--border-color) 0%,
+      var(--border-color) 1px,
+      transparent 1px,
+      transparent 10%
+    );
+    opacity: 0.3;
+  }
+  
+  .vertical .meter-background {
+    --vertical: to top;
+  }
+  
+  .horizontal .meter-background {
+    --vertical: to right;
+  }
+  
+  .threshold-marker {
+    position: absolute;
+    background-color: var(--color-warning);
+    z-index: 1;
+  }
+  
+  .vertical .threshold-marker {
+    left: 0;
+    right: 0;
+    height: 2px;
+  }
+  
+  .horizontal .threshold-marker {
+    top: 0;
+    bottom: 0;
+    width: 2px;
+  }
+  
+  .energy-level {
+    position: relative;
+    transition: all 0.1s ease-out;
+    z-index: 2;
+  }
+  
+  .vertical .energy-level {
+    width: 100%;
+  }
+  
+  .horizontal .energy-level {
+    height: 100%;
+  }
+  
+  .value-label {
+    position: absolute;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: bold;
+    z-index: 3;
+  }
+  
+  .vertical .value-label {
+    top: 5px;
+    right: 5px;
+  }
+  
+  .horizontal .value-label {
+    top: 50%;
+    right: 5px;
+    transform: translateY(-50%);
+  } 

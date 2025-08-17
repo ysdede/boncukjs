@@ -1,0 +1,354 @@
+.compact-stats-snr {
+    width: 100%;
+    background: linear-gradient(135deg, var(--bg-panel) 0%, rgba(var(--color-primary-rgb), 0.03) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.compact-stats-snr.header-mode {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+    max-width: 700px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.header-metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 0px;
+    height: 100%;
+    justify-content: center;
+    width: 100%;
+}
+
+.header-row-1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 20px;
+}
+
+.header-row-2 {
+    display: flex;
+    align-items: center;
+    height: 16px;
+    padding-top: 0px;
+    border-top: 1px solid rgba(var(--border-color-rgb), 0.1);
+}
+
+.snr-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 120px;
+}
+
+.snr-display {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+}
+
+.snr-bar-container-header {
+    width: 60px;
+    height: 6px;
+    position: relative;
+}
+
+.snr-bar-bg-header {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-input);
+    border-radius: 3px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(var(--border-color-rgb), 0.3);
+}
+
+.snr-value-fixed {
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    font-family: monospace;
+    width: 24px;
+    text-align: right;
+    transition: color 0.3s ease;
+}
+
+.snr-value-fixed.active {
+    color: var(--color-success);
+}
+
+.audio-metrics-grid, .perf-metrics-grid {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.system-info-grid {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+.metric-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 32px;
+    gap: 0px;
+}
+
+.metric-cell.active {
+    color: var(--color-success);
+}
+
+.metric-label-fixed {
+    font-size: 0.55rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    width: 100%;
+    text-align: center;
+    line-height: 1;
+}
+
+.metric-value-fixed {
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-family: monospace;
+    width: 100%;
+    text-align: center;
+    transition: color 0.3s ease;
+    line-height: 1;
+}
+
+.metric-cell.active .metric-value-fixed {
+    color: var(--color-success);
+}
+
+.mini-cell {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    min-width: 55px;
+}
+
+.mini-label-fixed {
+    font-size: 0.5rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    min-width: 24px;
+}
+
+.mini-value-fixed {
+    font-size: 0.55rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-family: monospace;
+    text-align: right;
+    flex: 1;
+    line-height: 1;
+}
+
+.discarded {
+    color: var(--color-warning);
+    font-size: 0.6rem;
+}
+
+.main-metrics {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+    height: 24px;
+}
+
+.speaking-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+}
+
+.speaking-indicator.active {
+    background: var(--color-success);
+    box-shadow: 0 0 8px var(--color-success);
+    animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.2); opacity: 0.7; }
+}
+
+.snr-section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 120px;
+}
+
+.snr-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 24px;
+}
+
+.snr-bar-container {
+    flex: 1;
+    height: 12px;
+}
+
+.snr-bar-bg {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-input);
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.snr-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, 
+        var(--color-danger) 0%, 
+        var(--color-warning) 40%, 
+        var(--color-success) 70%);
+    border-radius: 5px;
+    transition: width 0.2s ease, box-shadow 0.3s ease;
+}
+
+.snr-bar-fill.active {
+    box-shadow: 0 0 4px var(--color-success);
+}
+
+.snr-threshold {
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    width: 1px;
+    background: var(--color-info);
+    transform: translateX(-50%);
+}
+
+.snr-threshold.secondary {
+    background: var(--color-success);
+    opacity: 0.7;
+}
+
+.snr-value {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    min-width: 28px;
+    text-align: right;
+    transition: color 0.3s ease;
+}
+
+.snr-value.active {
+    color: var(--color-success);
+}
+
+.key-metrics, .perf-metrics {
+    display: flex;
+    gap: 8px;
+}
+
+.metric-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+}
+
+.metric-label {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.metric-value {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-family: monospace;
+    transition: color 0.3s ease;
+}
+
+.metric-value.active {
+    color: var(--color-success);
+}
+
+.discarded {
+    color: var(--color-warning);
+    font-size: 0.65rem;
+}
+
+.secondary-metrics {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(var(--border-color-rgb), 0.3);
+}
+
+.metric-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.6rem;
+}
+
+.group-label {
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-right: 2px;
+}
+
+.group-value {
+    color: var(--text-secondary);
+    font-family: monospace;
+    font-weight: 500;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .main-metrics {
+        gap: 8px;
+    }
+    
+    .snr-section {
+        min-width: 100px;
+    }
+    
+    .key-metrics, .perf-metrics {
+        gap: 6px;
+    }
+    
+    .secondary-metrics {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+} 

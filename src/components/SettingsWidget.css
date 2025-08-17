@@ -1,0 +1,150 @@
+.settings-widget {
+    padding: 1rem;
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    height: 100%;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.settings-section {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background-color: var(--bg-panel);
+    transition: all 0.2s ease-in-out;
+}
+
+.settings-section:has(.section-content) {
+    box-shadow: var(--shadow-sm);
+}
+
+.settings-widget .settings-section {
+    transition: all 0.2s ease-in-out;
+}
+
+.settings-widget .section-toggle {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    color: var(--text-primary);
+    transition: all 0.2s ease-in-out;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.settings-widget .section-toggle:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--color-primary);
+}
+
+.settings-widget .toggle-icon {
+    margin-right: 0.75rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    transition: transform 0.2s ease-in-out;
+}
+
+.settings-widget .section-toggle[aria-expanded="true"] .toggle-icon {
+    transform: rotate(90deg);
+}
+
+.settings-widget .section-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    flex: 1;
+}
+
+.settings-widget .section-content {
+    padding: 1rem 1rem 1rem 2.5rem; /* Left padding = icon width + margins */
+    margin-top: 0;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group:last-child {
+    margin-bottom: 0;
+}
+
+.settings-widget .form-label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.settings-widget .flex-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+/* For slider layouts - make the slider take full width */
+.settings-widget .flex-row .form-range {
+    width: 100%;
+}
+
+.flex-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.form-range {
+    flex: 1;
+}
+
+.settings-widget .range-value {
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    min-width: 4rem;
+    text-align: right;
+}
+
+/* When range-value is in a label (next to label text) */
+.settings-widget .form-label .range-value {
+    margin-left: 0.5rem;
+    min-width: 3rem;
+}
+
+.help-text {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+.w-full {
+    width: 100%;
+}
+
+.text-xs {
+    font-size: 0.75rem;
+}
+
+.settings-widget .btn {
+    width: 100%;
+    margin-top: 0.5rem;
+}
+
+/* Base styles are inherited from index.css for form-control, form-select, btn-base etc. */
+/* Only overrides or specific component styles are needed here. */

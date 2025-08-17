@@ -1,0 +1,25 @@
+.language-select {
+    width: 100%;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+  }
+  
+  .language-select:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+  }
+  
+  .language-select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  .language-select option {
+    background-color: var(--bg-input);
+    color: var(--text-primary);
+  } 

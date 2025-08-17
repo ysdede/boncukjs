@@ -1,0 +1,63 @@
+.visualization-container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    position: relative;
+}
+
+.waveform {
+    width: 100%;
+    height: 80px;
+    position: relative;
+}
+
+.stats-container {
+    width: 100%;
+    height: 18px;
+    position: relative;
+    background-color: var(--bg-panel);
+}
+
+.controls-panel {
+    background-color: var(--bg-panel);
+    color: var(--text-primary);
+}
+
+/* Style range inputs */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    background: var(--bg-input);
+    border-radius: 3px;
+    outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    cursor: pointer;
+    border: none;
+}
+
+/* Label styling */
+label {
+    color: var(--text-secondary);
+}
+
+h3 {
+    color: var(--text-primary);
+} 

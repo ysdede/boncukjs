@@ -1,0 +1,36 @@
+.dock-widget {
+  @apply border border-gray-700 dark:border-gray-600 bg-[var(--bg-panel)] text-[var(--text-primary)] flex flex-col select-none; /* integrate Tailwind + CSS vars */
+}
+
+.dock-widget__header {
+  @apply flex items-center gap-2 px-3 py-2 border-b border-gray-700 dark:border-gray-600 bg-[var(--bg-panel)];
+}
+
+.dock-widget__title {
+  @apply font-medium text-sm truncate flex-shrink-0 cursor-default;
+}
+
+.dock-widget__spacer {
+  @apply flex-1;
+}
+
+.dock-widget__actions {
+  @apply flex items-center gap-1;
+}
+
+.dock-widget__btn {
+  @apply w-6 h-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] transition;
+}
+
+.dock-widget__btn .material-icons {
+  @apply text-xs leading-none;
+}
+
+.dock-widget__body {
+  @apply p-3 overflow-auto;
+}
+
+/* Collapsed state */
+[data-collapsed="true"] .dock-widget__body {
+  display: none;
+} 
