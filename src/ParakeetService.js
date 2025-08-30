@@ -119,6 +119,10 @@ class ParakeetService {
     if (!(pcm instanceof Float32Array)) {
       throw new TypeError('ParakeetService.transcribe expects Float32Array');
     }
+    
+    // Add a small delay to prevent blocking
+    await new Promise(resolve => setTimeout(resolve, 0));
+    
     const model = await this._initModel();
     return model.transcribe(pcm, sampleRate, {
       returnTimestamps: true,

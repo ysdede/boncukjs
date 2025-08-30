@@ -124,6 +124,8 @@ class TranscriptionMerger {
      * @returns {Object} The updated transcript information.
      */
     merge(response) {
+        const mergeStartTime = performance.now();
+        
         // --- Step 1: Initial checks and flexible data extraction (new vs. legacy schema) ---
         if (!response) {
             if (this.config.debug) console.warn('[Merger] merge() called with null/undefined response.');
@@ -411,6 +413,11 @@ class TranscriptionMerger {
         // --- Step 8: Update State & Stats --- 
         // Stats are updated inline
         if (this.config.debug) console.log(`[Merger Seq ${currentSequence}] Merge complete. Total words: ${this.mergedTranscript.length}. Mature Cursor: ${this.matureCursorTime.toFixed(2)}s. Rolling WPM: ${this.stats.wpmRolling.toFixed(1)}, Overall WPM: ${this.stats.wpmOverall.toFixed(1)}`);
+        
+        const mergeElapsed = performance.now() - mergeStartTime;
+        if (mergeElapsed > 10) { // Log if it takes more than 10ms
+            console.log(`[Merger Seq ${currentSequence}] merge() took ${mergeElapsed.toFixed(2)} ms`);
+        }
         
         return this.getCurrentState();
     }

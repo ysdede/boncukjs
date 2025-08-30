@@ -261,6 +261,11 @@ export class AudioManager {
      * @param {number} sampleRate - Sample rate of the chunk
      */
     processNewChunk(chunk, energy, sampleRate) {
+        const processStartTime = performance.now();
+        if (Math.random() < 0.01) { // Log 1% of chunks
+            console.log(`[AudioManager] Processing chunk: ${chunk.length} samples, energy: ${energy.toFixed(6)}, sampleRate: ${sampleRate}`);
+        }
+        
         if (sampleRate && this.inputSampleRate !== sampleRate) {
             this.updateSampleRate(sampleRate);
         }
@@ -343,6 +348,13 @@ export class AudioManager {
                 waveformData: this.getVisualizationData(), // Send the ordered waveform buffer
                 metrics: this.getMetrics() // Also send current metrics for StatsWidget
             });
+        }
+        
+        const processElapsed = performance.now() - processStartTime;
+        if (processElapsed > 5) { // Log if it takes more than 5ms
+            if (Math.random() < 0.01) { // Log 1% of slow chunks
+                console.log(`[AudioManager] processNewChunk took ${processElapsed.toFixed(2)} ms`);
+            }
         }
     }
 
@@ -466,6 +478,11 @@ export class AudioManager {
      * @param {object} segment - The segment object from the processor
      */
     async handleNewSegment(segment) {
+        const segmentStartTime = performance.now();
+        if (Math.random() < 0.1) { // Log 10% of segments
+            console.log(`[AudioManager] handleNewSegment called with segment: ${segment.id}, duration: ${(segment.endTime - segment.startTime).toFixed(2)}s`);
+        }
+        
         const sampleRate = this.inputSampleRate;
         segment.sampleRate = sampleRate;
 
@@ -501,8 +518,15 @@ export class AudioManager {
         );
 
         // Retrieve audio directly from ring buffer
+        const readStartTime = performance.now();
         try {
             segment.audioData = this.ringBuffer.read(paddedStartSample, paddedEndSample);
+            const readElapsed = performance.now() - readStartTime;
+            if (readElapsed > 5) { // Log if it takes more than 5ms
+                if (Math.random() < 0.1) { // Log 10% of slow reads
+                    console.log(`[AudioManager] Ring buffer read took ${readElapsed.toFixed(2)} ms for ${segment.audioData.length} samples`);
+                }
+            }
         } catch (err) {
             console.error('[AudioManager] Failed to extract audio from ring buffer:', err);
             segment.audioData = new Float32Array(0);
@@ -510,6 +534,7 @@ export class AudioManager {
 
         // Instead of processing locally, send the segment to the worker
         if (this.worker && segment.audioData && segment.audioData.length > 0) {
+            const postMessageStartTime = performance.now();
             const audioBuffer = segment.audioData.buffer;
             this.worker.postMessage({
                 type: 'chunk',
@@ -521,6 +546,12 @@ export class AudioManager {
                     rate: this.inputSampleRate
                 }
             }, [audioBuffer]); // Transfer ownership for performance
+            const postMessageElapsed = performance.now() - postMessageStartTime;
+            if (postMessageElapsed > 5) { // Log if it takes more than 5ms
+                if (Math.random() < 0.1) { // Log 10% of slow posts
+                    console.log(`[AudioManager] Worker postMessage took ${postMessageElapsed.toFixed(2)} ms for ${segment.audioData.length} samples`);
+                }
+            }
         } else {
             if (!this.worker) console.warn("[AudioManager] Worker not available to process audio chunk.");
             return;
@@ -543,6 +574,13 @@ export class AudioManager {
 
         // Notify UI to re-render the waveform with the new segment
         this.notifyListeners('segmentsUpdated', this.segments);
+        
+        const segmentElapsed = performance.now() - segmentStartTime;
+        if (segmentElapsed > 10) { // Log if it takes more than 10ms
+            if (Math.random() < 0.1) { // Log 10% of slow segments
+                console.log(`[AudioManager] handleNewSegment took ${segmentElapsed.toFixed(2)} ms`);
+            }
+        }
     }
 
     // New method to calculate Fs-independent and Fs-dependent energy metrics

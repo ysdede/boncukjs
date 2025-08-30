@@ -3,6 +3,40 @@ import { RingBuffer } from '../utils/ringBuffer.js';
 import TranscriptionMerger from '../TranscriptionMerger.js';
 import { parakeetService } from '../ParakeetService.js';
 
+// Utility function for timestamped logging
+function logWithTimestamp(message, data = null) {
+  const timestamp = new Date().toISOString();
+  if (data) {
+    console.log(`[${timestamp}] [Worker] ${message}`, data);
+  } else {
+    console.log(`[${timestamp}] [Worker] ${message}`);
+  }
+}
+
+// Utility function to yield control back to the event loop
+async function yieldControl() {
+  return new Promise(resolve => {
+    if (typeof setImmediate !== 'undefined') {
+      setImmediate(resolve);
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
+// Utility function to process large arrays in chunks with yielding
+async function processInChunks(array, chunkSize, processChunk) {
+  for (let i = 0; i < array.length; i += chunkSize) {
+    const chunk = array.slice(i, i + chunkSize);
+    await processChunk(chunk, i);
+    
+    // Yield control periodically
+    if (i % (chunkSize * 10) === 0) {
+      await yieldControl();
+    }
+  }
+}
+
 // --- Audio buffering (fixed-size circular buffer) ---------------------------------
 let ringBuffer = null;
 const MAX_BUFFER_SECONDS = 180; // keep last 3 minutes of audio inside the worker
@@ -29,7 +63,7 @@ self.onmessage = async (e) => {
       let { audio, start, end, seqId, rate } = data;
 
       if (!isModelReady) {
-        console.warn('[Worker] Model not ready, skipping chunk.');
+        logWithTimestamp('Model not ready, skipping chunk.');
         return;
       }
 
@@ -88,16 +122,16 @@ self.onmessage = async (e) => {
       break;
     }
     case 'config': {
-      console.log('[Worker] Received config, loading model...');
+      logWithTimestamp('Received config, loading model...');
       isModelReady = false;
       try {
         await parakeetService.reloadWithConfig(data);
         isModelReady = true;
         self.postMessage({ type: 'ready' });
         self.postMessage({ type: 'init_complete' });
-        console.log('[Worker] Model is loaded and ready.');
+        logWithTimestamp('Model is loaded and ready.');
       } catch (err) {
-        console.error('[Worker] Model load failed:', err);
+        logWithTimestamp('Model load failed:', err);
         self.postMessage({ type: 'error', data: { message: 'Model load failed: ' + err.message } });
       }
       break;
@@ -109,9 +143,9 @@ self.onmessage = async (e) => {
           const ResamplingWorkerModule = data.workerUrl;
           resamplingWorker = new Worker(ResamplingWorkerModule, { type: 'module' });
           resamplingWorker.onmessage = handleResamplingWorkerMessage;
-          console.log('[Worker] Resampling worker initialized');
+          logWithTimestamp('Resampling worker initialized');
         } catch (err) {
-          console.error('[Worker] Failed to initialize resampling worker:', err);
+          logWithTimestamp('Failed to initialize resampling worker:', err);
         }
       }
       break;
@@ -125,11 +159,11 @@ function handleResamplingWorkerMessage(e) {
   switch (type) {
     case 'resample_complete': {
       // Handle resampled audio - this would be used in the transcription process
-      console.log(`[Worker] Resampling complete: ${data.originalLength} -> ${data.resampledLength} samples`);
+      logWithTimestamp(`Resampling complete: ${data.originalLength} -> ${data.resampledLength} samples`);
       break;
     }
     case 'error': {
-      console.error('[Worker] Resampling worker error:', data.message);
+      logWithTimestamp('Resampling worker error:', data.message);
       break;
     }
   }
@@ -137,6 +171,9 @@ function handleResamplingWorkerMessage(e) {
 
 async function transcribeRecentWindow() {
   if (isTranscribing || !ringBuffer) return;
+
+  const windowStartTime = performance.now();
+  logWithTimestamp('Starting transcribeRecentWindow');
 
   // ---------------------------------------------------------------------------
   // 1.  Determine window [startFrame, endFrame)
@@ -157,6 +194,8 @@ async function transcribeRecentWindow() {
   const audioToProcess = ringBuffer.read(startFrame, endFrame);
   if (audioToProcess.length === 0) return;
 
+  logWithTimestamp(`Read audio data: ${audioToProcess.length} samples, window range: [${startFrame}, ${endFrame})`);
+
   // Add a small delay to prevent blocking the worker thread completely
   await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -168,6 +207,7 @@ async function transcribeRecentWindow() {
     let audioForTranscription;
     if (sampleRate !== 16000) {
       if (resamplingWorker) {
+        logWithTimestamp(`Sending ${audioToProcess.length} samples to resampling worker`);
         // Send to resampling worker
         const resamplingPromise = new Promise((resolve, reject) => {
           const handleResamplingResponse = (e) => {
@@ -194,23 +234,27 @@ async function transcribeRecentWindow() {
         
         try {
           audioForTranscription = await resamplingPromise;
+          logWithTimestamp(`Resampling worker completed: ${audioToProcess.length} -> ${audioForTranscription.length} samples`);
         } catch (resampleError) {
-          console.warn('[Worker] Resampling worker failed, falling back to direct resampling:', resampleError);
-          audioForTranscription = resampleDirect(audioToProcess, sampleRate, 16000);
+          logWithTimestamp('Resampling worker failed, falling back to direct resampling:', resampleError);
+          audioForTranscription = await resampleDirect(audioToProcess, sampleRate, 16000);
         }
       } else {
         // Direct resampling in worker thread
-        audioForTranscription = resampleDirect(audioToProcess, sampleRate, 16000);
+        audioForTranscription = await resampleDirect(audioToProcess, sampleRate, 16000);
       }
     } else {
       audioForTranscription = audioToProcess;
+      logWithTimestamp(`No resampling needed: ${audioToProcess.length} samples`);
     }
     
     // Add another small delay before transcription to allow other tasks to run
     await new Promise(resolve => setTimeout(resolve, 0));
     
+    logWithTimestamp(`Starting transcription with ${audioForTranscription.length} samples`);
     const result = await parakeetService.transcribe(audioForTranscription, 16000);
     const elapsed = performance.now() - t0;
+    logWithTimestamp(`Transcription completed in ${elapsed.toFixed(2)} ms`);
 
     const adjustedWords = result.words.map(w => ({
       ...w,
@@ -228,7 +272,9 @@ async function transcribeRecentWindow() {
       metrics: result.metrics ?? null,
     };
 
+    logWithTimestamp(`Merging ${adjustedWords.length} words`);
     const merged = merger.merge(payload);
+    logWithTimestamp(`Merge completed, ${merged.words.length} words in transcript`);
 
     // --- Emit update -------------------------------------------------------
     self.postMessage({
@@ -254,7 +300,11 @@ async function transcribeRecentWindow() {
         sessionId,
       }
     });
+    
+    const windowElapsed = performance.now() - windowStartTime;
+    logWithTimestamp(`transcribeRecentWindow completed in ${windowElapsed.toFixed(2)} ms`);
   } catch (err) {
+    logWithTimestamp('Error in transcribeRecentWindow:', err);
     self.postMessage({ type: 'error', data: { message: err.message } });
   } finally {
     isTranscribing = false;
@@ -262,7 +312,7 @@ async function transcribeRecentWindow() {
 }
 
 // Direct resampling function (fallback)
-function resampleDirect(audio, from, to) {
+async function resampleDirect(audio, from, to) {
   if (from === to) {
     return audio;
   }
@@ -271,16 +321,26 @@ function resampleDirect(audio, from, to) {
   const newLength = Math.round(audio.length * ratio);
   const newAudio = new Float32Array(newLength);
 
-  for (let i = 0; i < newLength; i++) {
-    const t = i / ratio;
-    const t0 = Math.floor(t);
-    const t1 = Math.ceil(t);
-    const dt = t - t0;
+  // Process in chunks to prevent blocking
+  const CHUNK_SIZE = 10000;
+  for (let i = 0; i < newLength; i += CHUNK_SIZE) {
+    const endIndex = Math.min(i + CHUNK_SIZE, newLength);
+    for (let j = i; j < endIndex; j++) {
+      const t = j / ratio;
+      const t0 = Math.floor(t);
+      const t1 = Math.ceil(t);
+      const dt = t - t0;
 
-    if (t1 >= audio.length) {
-      newAudio[i] = audio[t0];
-    } else {
-      newAudio[i] = (1 - dt) * audio[t0] + dt * audio[t1];
+      if (t1 >= audio.length) {
+        newAudio[j] = audio[t0];
+      } else {
+        newAudio[j] = (1 - dt) * audio[t0] + dt * audio[t1];
+      }
+    }
+    
+    // Yield control back to the event loop periodically
+    if (i % (CHUNK_SIZE * 5) === 0) {
+      await yieldControl();
     }
   }
 

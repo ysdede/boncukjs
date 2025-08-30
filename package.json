@@ -33,7 +33,7 @@
     "wavefile": "^11.0.0",
     "wink-eng-lite-web-model": "^1.8.1",
     "wink-nlp": "^2.4.0",
-    "parakeet.js": "^0.0.2",
+    "parakeet.js": "^0.0.3",
     "onnxruntime-web": "^1.17.2"
   }
 }

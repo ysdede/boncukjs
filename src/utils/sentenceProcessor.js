@@ -21,6 +21,8 @@ class SentenceProcessor {
     }
 
     process(matureTimestamp, mergedWords) {
+        const processStartTime = performance.now();
+        
         if (!mergedWords || mergedWords.length === 0) {
             return { newSentences: [], updatedSentences: this.allMatureSentences };
         }
@@ -37,7 +39,9 @@ class SentenceProcessor {
         const contextWords = contextSentences.flatMap(sentence => sentence.words || []);
 
         const wordsToProcess = [...contextWords, ...newMatureWords];
+        const detectStartTime = performance.now();
         const sentenceEndings = this.sentenceBoundaryDetector.detectSentenceEndings(wordsToProcess);
+        const detectElapsed = performance.now() - detectStartTime;
 
         const newSentenceEndings = sentenceEndings.filter(ending => {
             const endingWord = wordsToProcess[ending.wordIndex];
@@ -110,6 +114,13 @@ class SentenceProcessor {
         
         this.allMatureSentences.push(...newSentences);
         this.lastProcessedWordTimestamp = matureTimestamp;
+        
+        const processElapsed = performance.now() - processStartTime;
+        if (processElapsed > 5) { // Log if it takes more than 5ms
+            if (Math.random() < 0.1) { // Log 10% of slow processes
+                console.log(`[SentenceProcessor] process() took ${processElapsed.toFixed(2)} ms (detect: ${detectElapsed.toFixed(2)} ms, ${wordsToProcess.length} words, ${newSentences.length} new sentences)`);
+            }
+        }
 
         return { newSentences, updatedSentences: this.allMatureSentences };
     }

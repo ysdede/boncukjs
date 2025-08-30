@@ -193,7 +193,12 @@ export class AudioSegmentProcessor {
 
         // Add a small delay to prevent blocking the main thread
         if (segments.length > 0) {
-            setTimeout(() => {}, 0);
+            // Use a more effective approach to yield control
+            if (typeof setImmediate !== 'undefined') {
+                setImmediate(() => {});
+            } else {
+                setTimeout(() => {}, 0);
+            }
         }
 
         return segments;
