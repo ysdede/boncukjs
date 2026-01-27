@@ -484,6 +484,10 @@ export class AudioManager {
         }
         
         const sampleRate = this.inputSampleRate;
+        // Ensure each segment has a unique id
+        if (!segment.id) {
+            segment.id = this.generateSegmentId();
+        }
         segment.sampleRate = sampleRate;
 
         // First apply lookback to the start time to capture the beginning of speech

@@ -115,7 +115,7 @@ class ParakeetService {
    * @param {number} sampleRate - sample rate of pcm.
    * @returns {Promise<object>} Full Parakeet.js result object.
    */
-  async transcribe(pcm, sampleRate) {
+  async transcribe(pcm, sampleRate, options = {}) {
     if (!(pcm instanceof Float32Array)) {
       throw new TypeError('ParakeetService.transcribe expects Float32Array');
     }
@@ -127,7 +127,8 @@ class ParakeetService {
     return model.transcribe(pcm, sampleRate, {
       returnTimestamps: true,
       returnConfidences: true,
-      frameStride: this.config.stride || 1
+      frameStride: this.config.stride || 1,
+      ...options
     });
   }
 

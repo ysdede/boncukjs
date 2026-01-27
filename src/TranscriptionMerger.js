@@ -100,6 +100,10 @@ class TranscriptionMerger {
         });
 
         console.log("SegmentAlign TranscriptionMerger initialized with config:", this.config);
+
+        // Rolling token tail for DP alignment
+        this.tokenTail = [];
+        this.maxTokenTailSeconds = 10.0;
     }
     
     getInitialStats() {
@@ -142,6 +146,10 @@ class TranscriptionMerger {
         if (Array.isArray(response.words) && response.words.length > 0) {
             // --- New Parakeet schema ---
             incomingWords = this.extractWordsFromPayload(response.words, sessionId, currentSequence, isFinalPayload);
+            // Capture tokens for DP alignment when available
+            if (Array.isArray(response.tokens) && response.tokens.length > 0) {
+                this.alignTokensWithTail(response.tokens);
+            }
         } else if (Array.isArray(response.segments) && response.segments.length > 0) {
             // --- Legacy schema (used by unit tests) ---
             const filtered = this.filterSegmentsByConfidence(response.segments);
@@ -417,6 +425,14 @@ class TranscriptionMerger {
         const mergeElapsed = performance.now() - mergeStartTime;
         if (mergeElapsed > 10) { // Log if it takes more than 10ms
             console.log(`[Merger Seq ${currentSequence}] merge() took ${mergeElapsed.toFixed(2)} ms`);
+        }
+
+        // Post-merge cleanup to reduce stutter and duplicate phrases near boundaries
+        try {
+            this.compressConsecutiveDuplicateWords(2.0);
+            this.suppressImmediatePhraseRepetition({ lookbackWords: 80, minLen: 3, maxLen: 8, windowSeconds: 6.0 });
+        } catch (e) {
+            if (this.config.debug) console.warn('[Merger] Post-merge cleanup failed:', e);
         }
         
         return this.getCurrentState();
@@ -1286,6 +1302,148 @@ class TranscriptionMerger {
         const overlapStart = Math.max(start1, start2);
         const overlapEnd = Math.min(end1, end2);
         return Math.max(0, overlapEnd - overlapStart);
+    }
+
+    // --- Token alignment (time-aware DP) ------------------------------------
+    alignTokensWithTail(newTokens = []) {
+        if (!Array.isArray(newTokens) || newTokens.length === 0) return;
+        const norm = (t) => ({
+            token: (t.token || '').toLowerCase(),
+            start: Number.isFinite(t.start_time) ? t.start_time : 0,
+            end: Number.isFinite(t.end_time) ? t.end_time : 0,
+            confidence: Number.isFinite(t.confidence) ? t.confidence : 0
+        });
+        const A = this.tokenTail.map(norm);
+        const B = newTokens.map(norm);
+        if (A.length === 0) {
+            this.tokenTail = B;
+            this._truncateTokenTail();
+            return;
+        }
+
+        const n = A.length, m = B.length;
+        const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+        const bt = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+        const wMatch = 2.0, wConf = 0.5, gap = 1.0, tWindow = 1.5;
+
+        for (let i = 1; i <= n; i++) { dp[i][0] = dp[i-1][0] - gap; bt[i][0] = 1; }
+        for (let j = 1; j <= m; j++) { dp[0][j] = dp[0][j-1] - gap; bt[0][j] = 2; }
+
+        for (let i = 1; i <= n; i++) {
+            for (let j = 1; j <= m; j++) {
+                const a = A[i-1], b = B[j-1];
+                let sMatch = -Infinity;
+                if (a.token && a.token === b.token) {
+                    const timeOk = Math.abs(a.start - b.start) <= tWindow && b.start >= a.start - 0.2;
+                    if (timeOk) {
+                        const conf = (a.confidence + b.confidence) * 0.5;
+                        sMatch = dp[i-1][j-1] + wMatch + wConf * conf;
+                    }
+                }
+                const sDel = dp[i-1][j] - gap;
+                const sIns = dp[i][j-1] - gap;
+                if (sMatch >= sDel && sMatch >= sIns) { dp[i][j] = sMatch; bt[i][j] = 0; }
+                else if (sDel >= sIns) { dp[i][j] = sDel; bt[i][j] = 1; }
+                else { dp[i][j] = sIns; bt[i][j] = 2; }
+            }
+        }
+
+        // Backtrack (not currently used to splice; we keep B as the tail snapshot)
+        this.tokenTail = B;
+        this._truncateTokenTail();
+    }
+
+    _truncateTokenTail() {
+        if (!Array.isArray(this.tokenTail) || this.tokenTail.length === 0) return;
+        const cutoff = (this.tokenTail[this.tokenTail.length - 1].end) - this.maxTokenTailSeconds;
+        let idx = 0;
+        while (idx < this.tokenTail.length && this.tokenTail[idx].end < cutoff) idx++;
+        if (idx > 0) this.tokenTail = this.tokenTail.slice(idx);
+    }
+
+    /**
+     * Remove immediate consecutive duplicate words (e.g., "just just") within a short time window.
+     * Keeps the higher-confidence instance when both are non-finalized; never removes finalized words.
+     * @param {number} windowSeconds
+     */
+    compressConsecutiveDuplicateWords(windowSeconds = 2.0) {
+        if (!Array.isArray(this.mergedTranscript) || this.mergedTranscript.length < 2) return;
+        const out = [];
+        for (let i = 0; i < this.mergedTranscript.length; i++) {
+            const w = this.mergedTranscript[i];
+            const prev = out.length ? out[out.length - 1] : null;
+            if (prev && w.text && prev.text && w.text.toLowerCase() === prev.text.toLowerCase()) {
+                const closeInTime = Math.abs((w.start - prev.end)) <= windowSeconds;
+                if (closeInTime) {
+                    // Prefer finalized; otherwise keep higher confidence
+                    if (prev.finalized) {
+                        continue; // drop current duplicate
+                    } else if (w.finalized) {
+                        out[out.length - 1] = w; // replace with finalized
+                        continue;
+                    } else {
+                        out[out.length - 1] = (w.confidence >= prev.confidence) ? w : prev;
+                        continue;
+                    }
+                }
+            }
+            out.push(w);
+        }
+        this.mergedTranscript = out;
+    }
+
+    /**
+     * Suppress phrase-level immediate repetition at boundaries (A followed immediately by A again).
+     * Only affects the recent tail (last lookbackWords) and never removes finalized words in the first occurrence.
+     * @param {{lookbackWords:number,minLen:number,maxLen:number,windowSeconds:number}} cfg
+     */
+    suppressImmediatePhraseRepetition(cfg = {}) {
+        const lookbackWords = cfg.lookbackWords ?? 80;
+        const minLen = cfg.minLen ?? 3;
+        const maxLen = cfg.maxLen ?? 8;
+        const windowSeconds = cfg.windowSeconds ?? 6.0;
+        const n = this.mergedTranscript.length;
+        if (n < 2 || minLen > maxLen) return;
+        const startIdx = Math.max(0, n - Math.max(lookbackWords, maxLen * 4));
+        // Work on a sliding window in the tail
+        for (let end = n - 1; end >= startIdx + (2 * minLen) - 1; end--) {
+            for (let L = Math.min(maxLen, Math.floor((end - startIdx + 1) / 2)); L >= minLen; L--) {
+                const mid = end - L + 1;
+                const aStart = mid - L;
+                if (aStart < startIdx) break;
+                const seqA = this.mergedTranscript.slice(aStart, mid);
+                const seqB = this.mergedTranscript.slice(mid, end + 1);
+                // Quick checks
+                const textEq = (sa, sb) => sa.text?.toLowerCase() === sb.text?.toLowerCase();
+                let equal = true;
+                for (let k = 0; k < L; k++) {
+                    if (!textEq(seqA[k], seqB[k])) { equal = false; break; }
+                }
+                if (!equal) continue;
+                const timeSpan = (seqB[seqB.length - 1].end - seqA[0].start);
+                if (timeSpan > windowSeconds) continue;
+                // We have A A repeated back-to-back; prefer earlier occurrence if finalized
+                const anyFinalInA = seqA.some(w => w.finalized);
+                if (anyFinalInA) {
+                    // Remove B words if they are not finalized
+                    const canRemoveAllB = seqB.every(w => !w.finalized);
+                    if (!canRemoveAllB) continue; // skip if B has finalized words
+                    this.mergedTranscript.splice(mid, L);
+                } else {
+                    // Neither finalized; keep the higher-confidence sequence overall
+                    const avgConf = arr => (arr.reduce((a, w) => a + (Number(w.confidence) || 0), 0) / Math.max(1, arr.length));
+                    const keepA = avgConf(seqA) >= avgConf(seqB);
+                    if (keepA) {
+                        // Remove B
+                        this.mergedTranscript.splice(mid, L);
+                    } else {
+                        // Remove A
+                        this.mergedTranscript.splice(aStart, L);
+                    }
+                }
+                return; // One suppression per call is sufficient; will run again next merge
+            }
+        }
     }
 }
 

@@ -74,3 +74,4 @@ QWEN.md
 GEMINI.md
 *.pem
 legacy/
+*.wim

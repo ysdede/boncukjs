@@ -94,6 +94,28 @@ export class SessionBuffer {
     };
   }
 
+  /**
+   * Returns a LC window ending at the given absolute end time.
+   * @param {number} endTimeAbs - Absolute end time in seconds (e.g., current segment end).
+   * @param {number} leftContextSeconds - How many seconds of left context to include.
+   * @returns {{audioToProcess: Float32Array, windowStartTime: number}|null}
+   */
+  getWindowEndingAt(endTimeAbs, leftContextSeconds = 2.4) {
+    if (this.completeAudio.length === 0) return null;
+
+    const startAbs = Math.max(this.bufferStartTime, endTimeAbs - Math.max(0, leftContextSeconds));
+    const startRel = startAbs - this.bufferStartTime;
+    const endRel = endTimeAbs - this.bufferStartTime;
+
+    const startSample = Math.max(0, Math.floor(startRel * this.sampleRate));
+    const endSample = Math.min(this.completeAudio.length, Math.ceil(endRel * this.sampleRate));
+
+    if (endSample <= startSample) return null;
+
+    const audioToProcess = this.completeAudio.subarray(startSample, endSample);
+    return { audioToProcess, windowStartTime: startAbs };
+  }
+
   reset() {
     this.segments = [];
     this.completeAudio = new Float32Array(0);
