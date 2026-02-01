@@ -190,29 +190,72 @@ const TranscriptPanel: Component = () => {
 };
 
 const StatusBar: Component = () => {
-  const modelStatus = () => {
+  const isCompatibilityMode = () => appStore.backend() === 'wasm';
+
+  const modelStatusText = () => {
     switch (appStore.modelState()) {
       case 'unloaded': return 'Model not loaded';
-      case 'loading': return `Loading model... ${appStore.modelProgress()}%`;
-      case 'ready': return `Ready (${appStore.backend().toUpperCase()})`;
-      case 'error': return 'Model error';
+      case 'loading': return appStore.modelMessage() || `Loading... ${appStore.modelProgress()}%`;
+      case 'ready': return 'Ready';
+      case 'error': return 'Error';
+    }
+  };
+
+  const statusDotClass = () => {
+    switch (appStore.modelState()) {
+      case 'ready': return 'bg-green-500';
+      case 'loading': return 'bg-yellow-500 animate-pulse';
+      case 'error': return 'bg-red-500';
+      default: return 'bg-gray-400';
     }
   };
 
   return (
-    <div class="fixed bottom-4 left-4 flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-800 rounded-full shadow-lg border border-gray-200 dark:border-gray-700 text-xs">
-      <span class={`w-2 h-2 rounded-full ${appStore.modelState() === 'ready' ? 'bg-green-500' :
-        appStore.modelState() === 'loading' ? 'bg-yellow-500 animate-pulse' :
-          appStore.modelState() === 'error' ? 'bg-red-500' :
-            'bg-gray-400'
-        }`} />
-      <span class="text-gray-600 dark:text-gray-400">{modelStatus()}</span>
-      <Show when={appStore.isOfflineReady()}>
-        <span class="text-green-500">• Offline Ready</span>
+    <div class="fixed bottom-4 left-4 flex items-center gap-3">
+      {/* Main status badge */}
+      <div class="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-800 rounded-full shadow-lg border border-gray-200 dark:border-gray-700 text-xs">
+        {/* Loading spinner or status dot */}
+        <Show
+          when={appStore.modelState() !== 'loading'}
+          fallback={
+            <div class="w-3 h-3 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
+          }
+        >
+          <span class={`w-2 h-2 rounded-full ${statusDotClass()}`} />
+        </Show>
+
+        <span class="text-gray-600 dark:text-gray-400">{modelStatusText()}</span>
+
+        {/* Backend indicator */}
+        <Show when={appStore.modelState() === 'ready'}>
+          <span class={`px-1.5 py-0.5 rounded text-[10px] font-medium ${isCompatibilityMode()
+              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+            }`}>
+            {appStore.backend().toUpperCase()}
+          </span>
+        </Show>
+      </div>
+
+      {/* Compatibility mode tooltip */}
+      <Show when={isCompatibilityMode() && appStore.modelState() === 'ready'}>
+        <div class="flex items-center gap-1 px-2 py-1 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-full text-xs text-amber-700 dark:text-amber-400">
+          <span class="material-icons-round text-sm">speed</span>
+          <span>Compatibility Mode</span>
+        </div>
+      </Show>
+
+      {/* Offline ready indicator */}
+      <Show when={appStore.isOfflineReady() && appStore.modelState() === 'ready'}>
+        <div class="flex items-center gap-1 px-2 py-1 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-full text-xs text-green-700 dark:text-green-400">
+          <span class="material-icons-round text-sm">cloud_off</span>
+          <span>Offline Ready</span>
+        </div>
       </Show>
     </div>
   );
 };
+
 
 // Privacy badge component with tooltip
 const PrivacyBadge: Component = () => {
