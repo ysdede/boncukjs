@@ -43,14 +43,15 @@ export class AudioEngine implements IAudioEngine {
         });
     }
 
-    async init(): Promise<void> {
-        if (this.audioContext) {
-            // If already initialized but changing device, stop tracks first
-            this.mediaStream?.getTracks().forEach(t => t.stop());
-        }
+    private isWorkletInitialized = false;
 
+    async init(): Promise<void> {
         // Request microphone permission with optional deviceId
         try {
+            if (this.mediaStream) {
+                this.mediaStream.getTracks().forEach(t => t.stop());
+            }
+
             const constraints: MediaStreamConstraints = {
                 audio: {
                     deviceId: this.deviceId ? { exact: this.deviceId } : undefined,
@@ -60,10 +61,11 @@ export class AudioEngine implements IAudioEngine {
                     noiseSuppression: true,
                 },
             };
+
             this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-        } catch (error) {
-            console.error('Microphone access failed', error);
-            throw new Error('Microphone access failed');
+        } catch (err) {
+            console.error('AudioEngine: Failed to get media stream:', err);
+            throw err;
         }
 
         if (!this.audioContext) {
@@ -72,35 +74,44 @@ export class AudioEngine implements IAudioEngine {
             });
         }
 
-
-        const processorCode = `
-      class CaptureProcessor extends AudioWorkletProcessor {
-        process(inputs, outputs) {
-          const input = inputs[0];
-          if (input && input[0]) {
-            this.port.postMessage(input[0]);
-          }
-          return true;
+        if (!this.isWorkletInitialized) {
+            const processorCode = `
+                class CaptureProcessor extends AudioWorkletProcessor {
+                    process(inputs, outputs) {
+                        const input = inputs[0];
+                        if (input && input[0]) {
+                            this.port.postMessage(input[0]);
+                        }
+                        return true;
+                    }
+                }
+                registerProcessor('capture-processor', CaptureProcessor);
+            `;
+            const blob = new Blob([processorCode], { type: 'application/javascript' });
+            const url = URL.createObjectURL(blob);
+            try {
+                await this.audioContext.audioWorklet.addModule(url);
+                this.isWorkletInitialized = true;
+                this.workletNode = new AudioWorkletNode(this.audioContext, 'capture-processor');
+                this.workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
+                    this.handleAudioChunk(event.data);
+                };
+                this.workletNode.connect(this.audioContext.destination);
+            } catch (err) {
+                console.error('AudioEngine: Failed to load worklet:', err);
+                // If it fails because of duplicate name, we can ignore or set initialized
+                this.isWorkletInitialized = true;
+            }
         }
-      }
-      registerProcessor('capture-processor', CaptureProcessor);
-    `;
-        const blob = new Blob([processorCode], { type: 'application/javascript' });
-        const url = URL.createObjectURL(blob);
-        await this.audioContext.audioWorklet.addModule(url);
 
+        // Reconnect source node
+        this.sourceNode?.disconnect();
         this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
-        this.workletNode = new AudioWorkletNode(this.audioContext, 'capture-processor');
-
-        this.workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
-            this.handleAudioChunk(event.data);
-        };
-
-        this.sourceNode.connect(this.workletNode);
+        this.sourceNode.connect(this.workletNode!);
     }
 
     async start(): Promise<void> {
-        if (!this.audioContext) {
+        if (!this.mediaStream || !this.audioContext || !this.workletNode) {
             await this.init();
         }
 

@@ -17,6 +17,7 @@ let modelManager: ModelManager | null = null;
 
 let transcriptionService: TranscriptionService | null = null;
 let energyPollInterval: number | undefined;
+let segmentUnsubscribe: (() => void) | null = null;
 
 const Header: Component<{ onTabChange: (tab: string) => void }> = (props) => {
   const isRecording = () => appStore.recordingState() === 'recording';
@@ -49,37 +50,74 @@ const Header: Component<{ onTabChange: (tab: string) => void }> = (props) => {
           audioEngine = new AudioEngine({
             sampleRate: 16000,
             bufferDuration: 30,
-            energyThreshold: 0.01, // Lower threshold for better sensitivity
+            energyThreshold: 0.01,
             minSpeechDuration: 100,
             minSilenceDuration: 300,
+            deviceId: appStore.selectedDeviceId(),
           });
+        } else {
+          audioEngine.updateConfig({ deviceId: appStore.selectedDeviceId() });
         }
 
-        // Initialize transcription service if model is ready
-        if (isModelReady() && modelManager && !transcriptionService) {
-          transcriptionService = new TranscriptionService(modelManager, {
-            sampleRate: 16000,
-            returnTimestamps: true,
-            debug: true,
-          }, {
-            onResult: (result) => {
-              if (result.chunkText) {
-                appStore.setPendingText(result.chunkText);
-              }
-              if (result.isFinal && result.text) {
-                appStore.appendTranscript(result.text + ' ');
-              }
-            },
-          });
-          transcriptionService.initialize();
+        if (isModelReady() && modelManager) {
+          if (!transcriptionService) {
+            transcriptionService = new TranscriptionService(modelManager, {
+              sampleRate: 16000,
+              returnTimestamps: true,
+              debug: true,
+            }, {
+              onResult: (result) => {
+                if (result.chunkText) {
+                  appStore.setPendingText(result.chunkText);
+                }
+
+                // Update metrics for debug panel
+                const startTime = Date.now();
+                appStore.setInferenceLatency(Date.now() - startTime); // This is mock latency for now, streamer doesn't provide it directly
+
+                if (result.words && result.words.length > 0) {
+                  const lastWords = result.words.slice(-5).map((w, i) => ({
+                    id: `TOK_${Date.now()}_${i}`,
+                    text: w.text,
+                    confidence: w.confidence || 0.95
+                  }));
+                  appStore.setDebugTokens(prev => [...prev.slice(-15), ...lastWords]);
+
+                  // Update system metrics
+                  appStore.setSystemMetrics({
+                    throughput: (result.words.length / (result.totalDuration || 0.1)),
+                    modelConfidence: result.words.reduce((acc, w) => acc + (w.confidence || 0.9), 0) / result.words.length,
+                  });
+                }
+
+                if (result.isFinal && result.text) {
+                  appStore.appendTranscript(result.text + ' ');
+                  appStore.setPendingText('');
+                }
+              },
+            });
+            transcriptionService.initialize();
+          } else {
+            transcriptionService.reset();
+          }
         }
 
-        // Subscribe to speech segments for transcription
-        audioEngine.onSpeechSegment(async (segment) => {
+        // Subscribe to speech segments for transcription (ensure clean sub)
+        if (segmentUnsubscribe) segmentUnsubscribe();
+        segmentUnsubscribe = audioEngine.onSpeechSegment(async (segment) => {
           if (transcriptionService && isModelReady()) {
+            const startTime = Date.now();
             try {
               const samples = audioEngine!.getRingBuffer().read(segment.startFrame, segment.endFrame);
-              await transcriptionService.processChunk(samples);
+              const result = await transcriptionService.processChunk(samples);
+
+              if (result.text) {
+                appStore.appendTranscript(result.text + ' ');
+                appStore.setPendingText('');
+                transcriptionService.reset(); // Clean slate for next utterance
+              }
+
+              appStore.setInferenceLatency(Date.now() - startTime);
             } catch (e) {
               console.error('Transcription error:', e);
             }
