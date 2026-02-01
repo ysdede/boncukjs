@@ -7,7 +7,7 @@
 
 import { Component, Show, createSignal, onMount, onCleanup } from 'solid-js';
 import { appStore } from './stores/appStore';
-import { CompactWaveform, ModelLoadingOverlay } from './components';
+import { CompactWaveform, ModelLoadingOverlay, Sidebar, DebugPanel } from './components';
 import { AudioEngine } from './lib/audio';
 import { ModelManager, TranscriptionService } from './lib/transcription';
 
@@ -99,30 +99,44 @@ const Header: Component = () => {
 
   return (
     <header class="flex-none p-4 pb-0">
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 p-3 flex items-center justify-between gap-4">
-        {/* Mic selector placeholder */}
-        <div class="flex items-center gap-3 bg-gray-100 dark:bg-gray-900/50 rounded-xl px-4 py-2 w-64">
-          <span class="material-icons-round text-gray-500">mic</span>
-          <span class="text-sm font-medium flex-1 truncate">Default Microphone</span>
+      <div class="bg-white dark:bg-card-dark rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 p-3 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3 bg-gray-100 dark:bg-gray-900/50 rounded-xl px-4 py-2 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 transition-colors w-64">
+          <span class="material-icons-round text-gray-500 dark:text-gray-400">mic</span>
+          <span class="text-sm font-medium flex-1 truncate">Stereo Mix (Realtek Audio)</span>
+          <span class="material-icons-round text-gray-500 text-sm">expand_more</span>
         </div>
 
-        {/* Record button */}
         <div class="flex items-center gap-3">
           <button
             onClick={toggleRecording}
             disabled={appStore.modelState() === 'loading'}
-            class={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${isRecording()
+            class={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group ${isRecording()
               ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20'
-              : 'bg-blue-500 hover:bg-blue-600 shadow-blue-500/20'
+              : 'bg-primary hover:bg-blue-600 shadow-primary/20'
               }`}
           >
-            <span class="material-icons-round text-white text-xl">
-              {isRecording() ? 'stop' : 'mic'}
-            </span>
+            <Show
+              when={isRecording()}
+              fallback={<div class="w-4 h-4 bg-white rounded-full group-hover:scale-110 transition-transform"></div>}
+            >
+              <span class="material-icons-round text-white text-xl">stop</span>
+            </Show>
+          </button>
+
+          <Show when={isRecording()}>
+            <button
+              onClick={toggleRecording}
+              class="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center justify-center transition-colors"
+            >
+              <span class="material-icons-round text-xl">stop</span>
+            </button>
+          </Show>
+
+          <button class="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center justify-center transition-colors">
+            <span class="material-icons-round text-xl">settings</span>
           </button>
         </div>
 
-        {/* Live waveform */}
         <div class="flex-1 h-10">
           <CompactWaveform
             audioLevel={appStore.audioLevel()}
@@ -136,7 +150,7 @@ const Header: Component = () => {
 
 const TranscriptPanel: Component = () => {
   return (
-    <section class="flex-1 flex flex-col min-w-0 bg-white dark:bg-slate-800 rounded-3xl shadow-xl border border-gray-200 dark:border-gray-700/50 overflow-hidden">
+    <section class="flex-1 flex flex-col min-w-0 bg-white dark:bg-card-dark rounded-3xl shadow-xl border border-gray-200 dark:border-gray-700/50 overflow-hidden relative z-10">
       {/* Header */}
       <div class="px-8 py-6 border-b border-gray-100 dark:border-gray-700/50 flex justify-between items-end">
         <div>
@@ -150,14 +164,20 @@ const TranscriptPanel: Component = () => {
         <div class="flex gap-2">
           <button
             onClick={() => appStore.copyTranscript()}
-            class="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-400 hover:text-blue-500 transition-all"
+            class="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-400 dark:text-gray-500 hover:text-primary dark:hover:text-primary transition-all"
           >
             <span class="material-icons-round text-xl">content_copy</span>
             <span class="text-[10px] font-medium">Copy</span>
           </button>
           <button
+            class="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-400 dark:text-gray-500 hover:text-primary dark:hover:text-primary transition-all"
+          >
+            <span class="material-icons-round text-xl">ios_share</span>
+            <span class="text-[10px] font-medium">Share</span>
+          </button>
+          <button
             onClick={() => appStore.clearTranscript()}
-            class="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-400 hover:text-red-400 transition-all"
+            class="flex flex-col items-center gap-1 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-400 dark:text-gray-500 hover:text-red-400 dark:hover:text-red-400 transition-all"
           >
             <span class="material-icons-round text-xl">delete_outline</span>
             <span class="text-[10px] font-medium">Clear</span>
@@ -168,7 +188,7 @@ const TranscriptPanel: Component = () => {
       {/* Transcript content */}
       <div class="flex-1 overflow-y-auto p-8 prose prose-lg dark:prose-invert max-w-none leading-relaxed">
         <Show
-          when={appStore.transcript()}
+          when={appStore.transcript() || appStore.pendingText()}
           fallback={
             <p class="text-xl text-gray-400 dark:text-gray-500">
               Click the microphone to start recording...
@@ -177,12 +197,15 @@ const TranscriptPanel: Component = () => {
         >
           <p class="text-xl text-gray-600 dark:text-gray-300">
             {appStore.transcript()}
+            <Show when={appStore.pendingText()}>
+              <span class="opacity-60"> {appStore.pendingText()}</span>
+            </Show>
           </p>
-        </Show>
-        <Show when={appStore.pendingText()}>
-          <span class="text-xl text-gray-400 dark:text-gray-500 opacity-60">
-            {appStore.pendingText()}
-          </span>
+          <Show when={appStore.recordingState() === 'recording'}>
+            <p class="text-xl text-gray-600 dark:text-gray-300 mt-6 opacity-60">
+              <span class="animate-pulse">Listening...</span>
+            </p>
+          </Show>
         </Show>
       </div>
     </section>
@@ -327,6 +350,9 @@ function formatDuration(seconds: number): string {
 
 // Main App
 const App: Component = () => {
+  const [activeTab, setActiveTab] = createSignal('transcript');
+  const [isDebugVisible, setIsDebugVisible] = createSignal(false);
+
   // Retry function for model loading
   const retryModelLoad = async () => {
     if (modelManager) {
@@ -340,8 +366,21 @@ const App: Component = () => {
     }
   };
 
-  // Initialize model on mount
-  onMount(async () => {
+  // Function to load the selected model
+  const loadSelectedModel = async () => {
+    if (!modelManager) return;
+
+    try {
+      await modelManager.loadModel({ modelId: appStore.selectedModelId() });
+      appStore.setBackend(modelManager.getBackend());
+      appStore.setIsOfflineReady(modelManager.isOfflineReady());
+    } catch (e) {
+      console.error('Failed to load model:', e);
+    }
+  };
+
+  // Initialize model manager on mount (but don't load yet)
+  onMount(() => {
     modelManager = new ModelManager({
       onProgress: (progress) => {
         appStore.setModelProgress(progress.progress);
@@ -355,15 +394,8 @@ const App: Component = () => {
         appStore.setModelMessage(error.message);
       },
     });
-
-    try {
-      await modelManager.loadModel();
-      appStore.setBackend(modelManager.getBackend());
-      appStore.setIsOfflineReady(modelManager.isOfflineReady());
-    } catch (e) {
-      console.error('Failed to load model:', e);
-    }
   });
+
 
   // Cleanup on unmount
   onCleanup(() => {
@@ -373,22 +405,35 @@ const App: Component = () => {
   });
 
   return (
-    <div class="h-screen w-full overflow-hidden flex flex-col bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 font-sans">
-      {/* Model Loading Overlay - Story 2.2 */}
+    <div class="h-screen w-full overflow-hidden flex flex-col bg-background-light dark:bg-background-dark text-gray-800 dark:text-gray-100 font-sans selection:bg-primary selection:text-white transition-colors duration-300">
+      {/* Model Selection & Loading Overlay */}
       <ModelLoadingOverlay
-        isVisible={appStore.modelState() === 'loading' || appStore.modelState() === 'error'}
+        isVisible={appStore.modelState() !== 'ready'}
+        state={appStore.modelState()}
         progress={appStore.modelProgress()}
         message={appStore.modelMessage()}
         backend={appStore.backend()}
-        isError={appStore.modelState() === 'error'}
-        onRetry={retryModelLoad}
+        selectedModelId={appStore.selectedModelId()}
+        onModelSelect={appStore.setSelectedModelId}
+        onStart={loadSelectedModel}
       />
+
 
       <Header />
 
-      <main class="flex-1 flex overflow-hidden p-4 gap-4">
+      <main class="flex-1 flex overflow-hidden p-4 gap-4 relative">
         <TranscriptPanel />
+        <Sidebar
+          activeTab={activeTab()}
+          onTabChange={setActiveTab}
+          onToggleDebug={() => setIsDebugVisible(!isDebugVisible())}
+        />
       </main>
+
+      <DebugPanel
+        isVisible={isDebugVisible()}
+        onClose={() => setIsDebugVisible(false)}
+      />
 
       <StatusBar />
       <PrivacyBadge />

@@ -7,12 +7,9 @@ export type BackendType = 'webgpu' | 'wasm';
 
 export interface ModelConfig {
   modelId: string;
-  encoderUrl: string;
-  decoderUrl: string;
-  tokenizerUrl: string;
-  preprocessorUrl: string;
   backend?: BackendType;
 }
+
 
 export interface ModelProgress {
   stage: string;

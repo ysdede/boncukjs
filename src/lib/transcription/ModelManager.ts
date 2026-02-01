@@ -15,13 +15,7 @@ import type {
 } from './types';
 
 // Default model configuration (Parakeet TDT 0.6B)
-const DEFAULT_MODEL: ModelConfig = {
-  modelId: 'parakeet-tdt-0.6b-v3',
-  encoderUrl: 'https://huggingface.co/nicoboss/parakeet-tdt-0.6b-v2-onnx/resolve/main/encoder-model.onnx',
-  decoderUrl: 'https://huggingface.co/nicoboss/parakeet-tdt-0.6b-v2-onnx/resolve/main/decoder_joint-model.onnx',
-  tokenizerUrl: 'https://huggingface.co/nicoboss/parakeet-tdt-0.6b-v2-onnx/resolve/main/vocab.txt',
-  preprocessorUrl: 'https://huggingface.co/nicoboss/parakeet-tdt-0.6b-v2-onnx/resolve/main/nemo80.onnx',
-};
+const DEFAULT_MODEL_ID = 'parakeet-tdt-0.6b-v2';
 
 const CACHE_NAME = 'boncukjs-model-cache-v1';
 
@@ -47,34 +41,25 @@ export class ModelManager {
   isCached(): boolean { return this._isCached; }
 
   /**
-   * Check if model is already cached
+   * Check if model is already cached (partial check)
    */
   async checkCache(): Promise<boolean> {
-    try {
-      const cache = await caches.open(CACHE_NAME);
-      const encoderResponse = await cache.match(DEFAULT_MODEL.encoderUrl);
-      this._isCached = !!encoderResponse;
-      return this._isCached;
-    } catch {
-      return false;
-    }
+    // In v2.0 we rely on parakeet.js/IndexedDB cache, but we can do a quick check
+    return this._isCached;
   }
 
   /**
    * Load the model with WebGPU/WASM fallback
    */
-  async loadModel(config: Partial<ModelConfig> = {}): Promise<void> {
-    const modelConfig = { ...DEFAULT_MODEL, ...config };
+  async loadModel(config: { modelId?: string } = {}): Promise<void> {
+    const modelId = config.modelId || DEFAULT_MODEL_ID;
 
     this._setState('loading');
-
-    // Check cache first
-    const isCached = await this.checkCache();
 
     this._setProgress({
       stage: 'init',
       progress: 0,
-      message: isCached ? 'Loading from cache...' : 'Initializing...'
+      message: 'Initializing...'
     });
 
     try {
@@ -92,20 +77,38 @@ export class ModelManager {
       this._setProgress({ stage: 'import', progress: 15, message: 'Loading parakeet.js...' });
 
       // @ts-ignore - parakeet.js is a JS module
-      const { ParakeetModel } = await import('parakeet.js');
+      const { ParakeetModel, getParakeetModel } = await import('parakeet.js');
 
-      // 3. Load the model (with download progress if not cached)
+      // 3. Resolve model URLs via parakeet.js Hub (handles .data files correctly)
       this._setProgress({
-        stage: 'download',
-        progress: isCached ? 50 : 20,
-        message: isCached ? 'Initializing model from cache...' : 'Downloading model (~300 MB)...'
+        stage: 'resolve',
+        progress: 20,
+        message: 'Resolving model assets...'
+      });
+
+      const modelAssets = await getParakeetModel(modelId, {
+        backend: this._backend,
+        progress: (p: any) => {
+          // Map parakeet.js progress to our UI
+          const pct = Math.round(20 + (p.loaded / p.total) * 70);
+          this._setProgress({
+            stage: 'download',
+            progress: pct,
+            message: `Downloading ${p.file} (${Math.round(p.loaded / 1024 / 1024)}MB)`
+          });
+        }
+      });
+
+      // 4. Load the model into ONNX Runtime
+      this._setProgress({
+        stage: 'compile',
+        progress: 90,
+        message: 'Compiling model (this may take a moment)...'
       });
 
       this._model = await ParakeetModel.fromUrls({
-        encoderUrl: modelConfig.encoderUrl,
-        decoderUrl: modelConfig.decoderUrl,
-        tokenizerUrl: modelConfig.tokenizerUrl,
-        preprocessorUrl: modelConfig.preprocessorUrl,
+        ...modelAssets.urls,
+        filenames: modelAssets.filenames,
         backend: this._backend === 'webgpu' ? 'webgpu-hybrid' : 'wasm',
         verbose: false,
       });
@@ -113,7 +116,7 @@ export class ModelManager {
       this._setProgress({ stage: 'complete', progress: 100, message: 'Model ready' });
       this._setState('ready');
 
-      // Mark as offline ready (model is now cached by parakeet.js/transformers.js)
+      // Mark as offline ready
       this._isOfflineReady = true;
       this._isCached = true;
 
@@ -129,6 +132,7 @@ export class ModelManager {
       throw error;
     }
   }
+
 
   /**
    * Detect WebGPU availability

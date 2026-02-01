@@ -15,9 +15,11 @@ function createAppStore() {
 
   // Model state
   const [modelState, setModelState] = createSignal<ModelState>('unloaded');
+  const [selectedModelId, setSelectedModelId] = createSignal('parakeet-tdt-0.6b-v2');
   const [modelProgress, setModelProgress] = createSignal(0);
   const [modelMessage, setModelMessage] = createSignal('');
   const [backend, setBackend] = createSignal<BackendType>('webgpu');
+
 
   // Transcript state
   const [transcript, setTranscript] = createSignal('');
@@ -74,6 +76,7 @@ function createAppStore() {
     recordingState,
     sessionDuration,
     modelState,
+    selectedModelId,
     modelProgress,
     modelMessage,
     backend,
@@ -88,9 +91,11 @@ function createAppStore() {
     setRecordingState,
     setSessionDuration,
     setModelState,
+    setSelectedModelId,
     setModelProgress,
     setModelMessage,
     setBackend,
+
     setTranscript,
     setPendingText,
     setAudioLevel,

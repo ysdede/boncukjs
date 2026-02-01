@@ -44,11 +44,11 @@ export const Waveform: Component<WaveformProps> = (props) => {
   });
   
   return (
-    <div class="flex items-center justify-end gap-[3px] h-10 opacity-80">
+    <div class="flex items-center justify-end gap-[3px] h-10 opacity-80 mask-image-linear-to-r">
       <For each={barHeights()}>
         {(height) => (
           <div
-            class="w-1 rounded-full transition-all duration-75 bg-blue-500"
+            class="w-1 bg-primary rounded-full transition-all duration-75 waveform-bar"
             style={{
               height: `${Math.max(10, height * 100)}%`,
               opacity: props.isRecording ? 0.8 + height * 0.2 : 0.4,
