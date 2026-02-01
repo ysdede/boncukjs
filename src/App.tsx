@@ -7,20 +7,21 @@
 
 import { Component, Show, createSignal, onMount, onCleanup } from 'solid-js';
 import { appStore } from './stores/appStore';
-import { CompactWaveform } from './components';
+import { CompactWaveform, ModelLoadingOverlay } from './components';
 import { AudioEngine } from './lib/audio';
 import { ModelManager, TranscriptionService } from './lib/transcription';
 
 // Singleton instances
 let audioEngine: AudioEngine | null = null;
 let modelManager: ModelManager | null = null;
+
 let transcriptionService: TranscriptionService | null = null;
 let energyPollInterval: number | undefined;
 
 const Header: Component = () => {
   const isRecording = () => appStore.recordingState() === 'recording';
   const isModelReady = () => appStore.modelState() === 'ready';
-  
+
   const toggleRecording = async () => {
     if (isRecording()) {
       // Stop recording
@@ -29,13 +30,13 @@ const Header: Component = () => {
         energyPollInterval = undefined;
       }
       audioEngine?.stop();
-      
+
       // Finalize transcription
       if (transcriptionService) {
         const final = transcriptionService.finalize();
         appStore.setTranscript(final.text);
       }
-      
+
       appStore.setAudioLevel(0);
       appStore.stopRecording();
     } else {
@@ -51,7 +52,7 @@ const Header: Component = () => {
             minSilenceDuration: 300,
           });
         }
-        
+
         // Initialize transcription service if model is ready
         if (isModelReady() && modelManager && !transcriptionService) {
           transcriptionService = new TranscriptionService(modelManager, {
@@ -66,7 +67,7 @@ const Header: Component = () => {
           });
           transcriptionService.initialize();
         }
-        
+
         // Subscribe to speech segments for transcription
         audioEngine.onSpeechSegment(async (segment) => {
           if (transcriptionService && isModelReady()) {
@@ -78,10 +79,10 @@ const Header: Component = () => {
             }
           }
         });
-        
+
         await audioEngine.start();
         appStore.startRecording();
-        
+
         // Poll energy for visualization
         energyPollInterval = window.setInterval(() => {
           if (audioEngine) {
@@ -89,13 +90,13 @@ const Header: Component = () => {
             appStore.setIsSpeechDetected(audioEngine.isSpeechActive());
           }
         }, 50);
-        
+
       } catch (err) {
         console.error('Failed to start recording:', err);
       }
     }
   };
-  
+
   return (
     <header class="flex-none p-4 pb-0">
       <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 p-3 flex items-center justify-between gap-4">
@@ -104,29 +105,28 @@ const Header: Component = () => {
           <span class="material-icons-round text-gray-500">mic</span>
           <span class="text-sm font-medium flex-1 truncate">Default Microphone</span>
         </div>
-        
+
         {/* Record button */}
         <div class="flex items-center gap-3">
           <button
             onClick={toggleRecording}
             disabled={appStore.modelState() === 'loading'}
-            class={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-              isRecording() 
-                ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' 
-                : 'bg-blue-500 hover:bg-blue-600 shadow-blue-500/20'
-            }`}
+            class={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${isRecording()
+              ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20'
+              : 'bg-blue-500 hover:bg-blue-600 shadow-blue-500/20'
+              }`}
           >
             <span class="material-icons-round text-white text-xl">
               {isRecording() ? 'stop' : 'mic'}
             </span>
           </button>
         </div>
-        
+
         {/* Live waveform */}
         <div class="flex-1 h-10">
-          <CompactWaveform 
-            audioLevel={appStore.audioLevel()} 
-            isRecording={isRecording()} 
+          <CompactWaveform
+            audioLevel={appStore.audioLevel()}
+            isRecording={isRecording()}
           />
         </div>
       </div>
@@ -164,11 +164,11 @@ const TranscriptPanel: Component = () => {
           </button>
         </div>
       </div>
-      
+
       {/* Transcript content */}
       <div class="flex-1 overflow-y-auto p-8 prose prose-lg dark:prose-invert max-w-none leading-relaxed">
-        <Show 
-          when={appStore.transcript()} 
+        <Show
+          when={appStore.transcript()}
           fallback={
             <p class="text-xl text-gray-400 dark:text-gray-500">
               Click the microphone to start recording...
@@ -198,15 +198,14 @@ const StatusBar: Component = () => {
       case 'error': return 'Model error';
     }
   };
-  
+
   return (
     <div class="fixed bottom-4 left-4 flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-800 rounded-full shadow-lg border border-gray-200 dark:border-gray-700 text-xs">
-      <span class={`w-2 h-2 rounded-full ${
-        appStore.modelState() === 'ready' ? 'bg-green-500' :
+      <span class={`w-2 h-2 rounded-full ${appStore.modelState() === 'ready' ? 'bg-green-500' :
         appStore.modelState() === 'loading' ? 'bg-yellow-500 animate-pulse' :
-        appStore.modelState() === 'error' ? 'bg-red-500' :
-        'bg-gray-400'
-      }`} />
+          appStore.modelState() === 'error' ? 'bg-red-500' :
+            'bg-gray-400'
+        }`} />
       <span class="text-gray-600 dark:text-gray-400">{modelStatus()}</span>
       <Show when={appStore.isOfflineReady()}>
         <span class="text-green-500">• Offline Ready</span>
@@ -218,7 +217,7 @@ const StatusBar: Component = () => {
 // Privacy badge component with tooltip
 const PrivacyBadge: Component = () => {
   const [showDetails, setShowDetails] = createSignal(false);
-  
+
   return (
     <div class="fixed bottom-4 right-4">
       {/* Privacy tooltip */}
@@ -251,7 +250,7 @@ const PrivacyBadge: Component = () => {
           </div>
         </div>
       </Show>
-      
+
       {/* Badge button */}
       <button
         onClick={() => setShowDetails(!showDetails())}
@@ -276,20 +275,35 @@ function formatDuration(seconds: number): string {
 
 // Main App
 const App: Component = () => {
+  // Retry function for model loading
+  const retryModelLoad = async () => {
+    if (modelManager) {
+      try {
+        await modelManager.loadModel();
+        appStore.setBackend(modelManager.getBackend());
+        appStore.setIsOfflineReady(modelManager.isOfflineReady());
+      } catch (e) {
+        console.error('Failed to load model:', e);
+      }
+    }
+  };
+
   // Initialize model on mount
   onMount(async () => {
     modelManager = new ModelManager({
       onProgress: (progress) => {
         appStore.setModelProgress(progress.progress);
+        appStore.setModelMessage(progress.message || '');
       },
       onStateChange: (state) => {
         appStore.setModelState(state);
       },
       onError: (error) => {
         console.error('Model error:', error);
+        appStore.setModelMessage(error.message);
       },
     });
-    
+
     try {
       await modelManager.loadModel();
       appStore.setBackend(modelManager.getBackend());
@@ -298,26 +312,37 @@ const App: Component = () => {
       console.error('Failed to load model:', e);
     }
   });
-  
+
   // Cleanup on unmount
   onCleanup(() => {
     if (energyPollInterval) clearInterval(energyPollInterval);
     audioEngine?.dispose();
     modelManager?.dispose();
   });
-  
+
   return (
     <div class="h-screen w-full overflow-hidden flex flex-col bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 font-sans">
+      {/* Model Loading Overlay - Story 2.2 */}
+      <ModelLoadingOverlay
+        isVisible={appStore.modelState() === 'loading' || appStore.modelState() === 'error'}
+        progress={appStore.modelProgress()}
+        message={appStore.modelMessage()}
+        backend={appStore.backend()}
+        isError={appStore.modelState() === 'error'}
+        onRetry={retryModelLoad}
+      />
+
       <Header />
-      
+
       <main class="flex-1 flex overflow-hidden p-4 gap-4">
         <TranscriptPanel />
       </main>
-      
+
       <StatusBar />
       <PrivacyBadge />
     </div>
   );
 };
+
 
 export default App;

@@ -3,3 +3,4 @@
  */
 
 export { Waveform, CompactWaveform } from './Waveform';
+export { ModelLoadingOverlay } from './ModelLoadingOverlay';
