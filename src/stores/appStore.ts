@@ -8,6 +8,18 @@
 import { createSignal, createRoot, onCleanup } from 'solid-js';
 import type { RecordingState, ModelState, BackendType } from '../types';
 
+export interface DebugToken {
+  id: string;
+  text: string;
+  confidence: number;
+}
+
+export interface SystemMetrics {
+  throughput: number; // tokens/sec
+  modelConfidence: number; // 0-1
+  vramUsage?: string;
+}
+
 function createAppStore() {
   // Recording state
   const [recordingState, setRecordingState] = createSignal<RecordingState>('idle');
@@ -23,6 +35,7 @@ function createAppStore() {
   const [modelProgress, setModelProgress] = createSignal(0);
   const [modelMessage, setModelMessage] = createSignal('');
   const [backend, setBackend] = createSignal<BackendType>('webgpu');
+  const [errorMessage, setErrorMessage] = createSignal<string | null>(null);
 
 
   // Transcript state
@@ -36,6 +49,14 @@ function createAppStore() {
   // Offline state
   const [isOfflineReady, setIsOfflineReady] = createSignal(false);
   const [isOnline, setIsOnline] = createSignal(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  // Debug metrics
+  const [inferenceLatency, setInferenceLatency] = createSignal(0);
+  const [debugTokens, setDebugTokens] = createSignal<DebugToken[]>([]);
+  const [systemMetrics, setSystemMetrics] = createSignal<SystemMetrics>({
+    throughput: 0,
+    modelConfidence: 0,
+  });
 
   // Network status listeners
   if (typeof window !== 'undefined') {
@@ -114,6 +135,10 @@ function createAppStore() {
     isSpeechDetected,
     isOfflineReady,
     isOnline,
+    inferenceLatency,
+    debugTokens,
+    systemMetrics,
+    errorMessage,
 
     // Setters (for internal use)
     setRecordingState,
@@ -125,12 +150,16 @@ function createAppStore() {
     setModelProgress,
     setModelMessage,
     setBackend,
+    setErrorMessage,
 
     setTranscript,
     setPendingText,
     setAudioLevel,
     setIsSpeechDetected,
     setIsOfflineReady,
+    setInferenceLatency,
+    setDebugTokens,
+    setSystemMetrics,
 
     // Actions
     startRecording,
