@@ -59,29 +59,63 @@ export class AudioEngine implements IAudioEngine {
                     sampleRate: this.config.sampleRate,
                     echoCancellation: true,
                     noiseSuppression: true,
+                    autoGainControl: true,
                 },
             };
 
+            console.log('[AudioEngine] Requesting microphone:', constraints);
             this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+            console.log('[AudioEngine] Microphone stream acquired:', this.mediaStream.id);
         } catch (err) {
-            console.error('AudioEngine: Failed to get media stream:', err);
+            console.error('[AudioEngine] Failed to get media stream:', err);
             throw err;
         }
 
         if (!this.audioContext) {
             this.audioContext = new AudioContext({
                 sampleRate: this.config.sampleRate,
+                latencyHint: 'interactive',
             });
+            console.log('[AudioEngine] Created AudioContext:', this.audioContext.state);
         }
 
         if (!this.isWorkletInitialized) {
+            // Buffered processor: 4096 samples @ 16kHz = ~256ms.
+            // This is safer for the main thread than 128 samples.
             const processorCode = `
                 class CaptureProcessor extends AudioWorkletProcessor {
+                    constructor() {
+                        super();
+                        this.bufferSize = 1024; // 64ms @ 16kHz
+                        this.buffer = new Float32Array(this.bufferSize);
+                        this.index = 0;
+                        this._lastLog = 0;
+                    }
+
                     process(inputs, outputs) {
                         const input = inputs[0];
-                        if (input && input[0]) {
-                            this.port.postMessage(input[0]);
+                        if (!input || !input[0]) return true;
+                        
+                        const channelData = input[0];
+                        
+                        // Buffer the data
+                        for (let i = 0; i < channelData.length; i++) {
+                            this.buffer[this.index++] = channelData[i];
+                            
+                            if (this.index >= this.bufferSize) {
+                                // Send buffer
+                                this.port.postMessage(this.buffer.slice());
+                                this.index = 0;
+                                
+                                // Debug log every ~5 seconds (roughly every 20 chunks)
+                                const now = Date.now();
+                                if (now - this._lastLog > 5000) {
+                                    console.log('[AudioWorklet] Processed 4096 samples');
+                                    this._lastLog = now;
+                                }
+                            }
                         }
+                        
                         return true;
                     }
                 }
@@ -92,22 +126,35 @@ export class AudioEngine implements IAudioEngine {
             try {
                 await this.audioContext.audioWorklet.addModule(url);
                 this.isWorkletInitialized = true;
-                this.workletNode = new AudioWorkletNode(this.audioContext, 'capture-processor');
-                this.workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
-                    this.handleAudioChunk(event.data);
-                };
-                this.workletNode.connect(this.audioContext.destination);
+                console.log('[AudioEngine] AudioWorklet module loaded');
             } catch (err) {
-                console.error('AudioEngine: Failed to load worklet:', err);
-                // If it fails because of duplicate name, we can ignore or set initialized
-                this.isWorkletInitialized = true;
+                console.error('[AudioEngine] Failed to load worklet:', err);
+                if (err instanceof Error && err.name === 'InvalidStateError') {
+                    // Ignore if already registered
+                    this.isWorkletInitialized = true;
+                }
             }
         }
+
+        // Re-create worklet node if needed (it might handle dispose differently, but safe to new)
+        if (this.workletNode) this.workletNode.disconnect();
+
+        this.workletNode = new AudioWorkletNode(this.audioContext, 'capture-processor');
+        this.workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
+            this.handleAudioChunk(event.data);
+        };
+        this.workletNode.onprocessorerror = (e) => {
+            console.error('[AudioEngine] Worklet processor error:', e);
+        };
 
         // Reconnect source node
         this.sourceNode?.disconnect();
         this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
-        this.sourceNode.connect(this.workletNode!);
+        this.sourceNode.connect(this.workletNode);
+
+        // Keep graph alive
+        this.workletNode.connect(this.audioContext.destination);
+        console.log('[AudioEngine] Graph connected: Source -> Worklet -> Destination');
     }
 
     async start(): Promise<void> {
