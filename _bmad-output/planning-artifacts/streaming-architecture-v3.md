@@ -19,7 +19,9 @@ because:
 - **Token-Level Local Agreement** (improved from user's proven merging approach)
 - **Frame-Aligned Streaming** (new capability added to parakeet.js)
 - **Mel Feature Caching** (10-15% compute savings)
-- **Sentence-Context Windows** (retranscribe with context so model produces correct caps/punct)
+- **Short Overlapping Windows** (5-7s windows with 2s overlaps - replaces inefficient 8-30s long context retranscription)
+
+**Goal:** Replace the OLD approach (retranscribe last 2-3 sentences = 8-30 seconds) with SHORT windows + smart token-level merging for both accuracy AND speed.
 
 ---
 
@@ -80,17 +82,18 @@ because:
 │  └─────────────────────────────────────────────────────────────────────────┘   │
 │                                    ↓                                           │
 │  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │                    MODEL OUTPUT (No Post-Processing)                    │   │
+│  │                    OUTPUT MERGE (Token-Level Accuracy)                  │   │
 │  ├─────────────────────────────────────────────────────────────────────────┤   │
-│  │  The Parakeet model already outputs proper caps & punctuation!          │   │
+│  │  SHORT windows (5-7s) + OVERLAPS (2s) + TOKEN-LEVEL MERGE              │   │
 │  │                                                                         │   │
-│  │  Key: Retranscribe with SENTENCE CONTEXT (last 2-3 sentences)          │   │
-│  │       so model has enough context to produce correct formatting.        │   │
+│  │  OLD (inefficient): Retranscribe 8-30s (last 2-3 sentences)            │   │
+│  │  NEW (v3): Short windows merged with token IDs, timestamps, logProbs   │   │
 │  │                                                                         │   │
-│  │  NO post-processing needed - just merge and display model output.      │   │
+│  │  • Model still handles caps/punct - we just merge smarter              │   │
+│  │  • NO post-processing, NO long context retranscription                 │   │
+│  │  • Use frameIndices & logProbs for accurate overlap alignment          │   │
 │  │                                                                         │   │
-│  │  Model output: "How are you today? I am fine."                         │   │
-│  │  We display:   "How are you today? I am fine."  (as-is)                │   │
+│  │  Result: Accurate + Fast streaming transcription                       │   │
 │  └─────────────────────────────────────────────────────────────────────────┘   │
 │                                    ↓                                           │
 │  ┌─────────────────────────────────────────────────────────────────────────┐   │

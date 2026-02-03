@@ -19,11 +19,14 @@ that NVIDIA's "State-Preserving Streaming" approach doesn't work with ONNX Runti
 - ✅ Helper methods: `getFrameTimeStride()`, `frameToTime()`, `getStreamingConstants()`
 
 ### To Implement (in BoncukJS)
-- [ ] `TokenStreamTranscriber` - main streaming orchestrator (sentence-context windows)
-- [ ] `SentenceBoundaryDetector` - detect sentence ends to define retranscription windows
+- [ ] `TokenStreamTranscriber` - main streaming orchestrator (short overlapping windows)
 - [ ] UI integration - confirmed vs pending text display
 
-**Note:** NO post-processing for caps/punctuation. The Parakeet model outputs proper formatting when given sufficient context. We achieve this by retranscribing with sentence-context windows (last 2-3 sentences).
+**Key Change from OLD approach:**
+- OLD: Retranscribe last 2-3 sentences (8-30 seconds) - works but inefficient
+- NEW: Short windows (5-7s) with overlaps (2s) + token-level merging using IDs, timestamps, logProbs
+
+Model still handles caps/punct - we just merge smarter for both accuracy AND speed.
 
 ---
 
@@ -168,61 +171,61 @@ export class TokenStreamTranscriber {
 
 ---
 
-### Task 2: SentenceBoundaryDetector Class
+### Task 2: Window Manager & Overlap Strategy
 
-**File:** `src/lib/transcription/SentenceBoundaryDetector.ts`
+**File:** `src/lib/transcription/WindowManager.ts`
 
-**Purpose:** Detects sentence boundaries in the FINALIZED transcript to determine
-the START POINT for the retranscription window. This is NOT for post-processing
-formatting - it's for defining WHERE to start the sliding context window.
+**Purpose:** Manages the SHORT overlapping window strategy for efficient streaming.
+This replaces the OLD approach of retranscribing last 2-3 sentences (8-30 seconds).
 
-**Key Insight:** The Parakeet model already outputs proper capitalization and 
-punctuation when given sufficient context. We achieve this by retranscribing 
-the last 2-3 sentences + new audio. The model sees complete sentences and 
-produces correct formatting.
+**Key Parameters:**
+- Window size: 5-7 seconds (configurable)
+- Overlap: 2 seconds (configurable)
+- Merge strategy: Token-level using IDs, timestamps, logProbs from parakeet.js
 
 ```typescript
-export interface SentenceInfo {
-  text: string;
-  startTime: number;      // Audio timestamp where sentence starts
-  endTime: number;        // Audio timestamp where sentence ends
-  startSample: number;    // Sample index in audio buffer
-  endSample: number;      // Sample index in audio buffer
+export interface WindowConfig {
+  windowDuration: number;   // seconds (default: 5.0)
+  overlapDuration: number;  // seconds (default: 2.0)
+  minWindowDuration: number; // seconds (default: 1.0)
 }
 
-export class SentenceBoundaryDetector {
-  private sentences: SentenceInfo[] = [];
+export class WindowManager {
+  private config: WindowConfig;
+  private currentWindowStart: number = 0;  // in seconds
+  private totalAudioTime: number = 0;
   
-  /**
-   * Update with new finalized transcript from model.
-   * Parses punctuation (. ! ?) to find sentence boundaries.
-   */
-  updateFromTranscript(text: string, words: WordWithTimestamp[]): void {
-    // Find sentence-ending punctuation in model output
-    // Map back to word timestamps
-    // Store sentence boundaries
+  constructor(config: Partial<WindowConfig> = {}) {
+    this.config = {
+      windowDuration: config.windowDuration ?? 5.0,
+      overlapDuration: config.overlapDuration ?? 2.0,
+      minWindowDuration: config.minWindowDuration ?? 1.0,
+    };
   }
   
   /**
-   * Get the start point for retranscription window.
-   * Returns the start of the Nth-to-last sentence.
-   * 
-   * @param sentencesBack - How many sentences to include (default: 2)
-   * @returns Audio timestamp to start retranscription from
+   * Get the audio range for the next transcription window.
+   * Returns [startTime, endTime] in seconds.
    */
-  getRetranscriptionStart(sentencesBack: number = 2): number {
-    if (this.sentences.length < sentencesBack) {
-      return 0; // Not enough sentences, start from beginning
-    }
-    const targetSentence = this.sentences[this.sentences.length - sentencesBack];
-    return targetSentence.startTime;
+  getNextWindowRange(newAudioEnd: number): [number, number] {
+    const windowEnd = newAudioEnd;
+    const windowStart = Math.max(0, windowEnd - this.config.windowDuration);
+    return [windowStart, windowEnd];
   }
   
   /**
-   * Get the last N sentences for context display.
+   * Get the overlap region that needs token-level merging.
    */
-  getLastSentences(n: number): SentenceInfo[] {
-    return this.sentences.slice(-n);
+  getOverlapRegion(prevWindowEnd: number, currWindowStart: number): [number, number] {
+    return [currWindowStart, prevWindowEnd];
+  }
+  
+  /**
+   * Advance window after successful merge.
+   */
+  advance(newWindowEnd: number): void {
+    this.currentWindowStart = Math.max(0, newWindowEnd - this.config.overlapDuration);
+    this.totalAudioTime = newWindowEnd;
   }
 }
       

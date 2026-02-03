@@ -16,7 +16,7 @@ keyDecisions:
   - 'ADOPTED: Token-Level Local Agreement with Frame-Aligned Merging'
   - 'Dual-stage VAD pipeline (Pre + Post)'
   - 'SolidJS frontend with TypeScript'
-  - 'Sentence-Context Windows: Retranscribe last 2-3 sentences for model context (NO post-processing for caps/punct)'
+  - 'Short overlapping windows (5-7s) + token-level merging (IDs, timestamps, logProbs) - replaces inefficient long context retranscription'
 ---
 
 # BoncukJS v2.0 Architecture Decision Document
@@ -39,7 +39,9 @@ _Real-time Speech Transcription Web Application_
 1.  **Token-Level Merging:** Compare tokens by `(id, frameIndex, timestamp)` instead of text.
 2.  **Frame-Aligned Streaming:** Leverage new `parakeet.js` features (`returnFrameIndices`, `returnLogProbs`) for precise alignment.
 3.  **Mel Feature Caching:** Cache mel spectrograms for 10-15% compute savings on overlapping regions.
-4.  **Sentence-Context Windows:** Retranscribe last 2-3 sentences + new audio so model has context to produce correct caps/punct (NO post-processing).
+4.  **Short Overlapping Windows:** Transcribe 5-7s windows with 2s overlaps (replaces inefficient 8-30s long context retranscription).
+
+**Goal:** Replace the OLD approach (retranscribe last 2-3 sentences = 8-30 seconds) with SHORT windows + smart token-level merging for both accuracy AND speed.
 
 | Approach | Logic | Status |
 |----------|-------|--------|
@@ -100,16 +102,17 @@ _Real-time Speech Transcription Web Application_
 │  │ Result: Keep prev tokens up to anchor, append curr after       │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
-│  LAYER 5: MODEL OUTPUT (No Post-Processing)                           │
+│  LAYER 5: OUTPUT MERGE (Token-Level Accuracy)                         │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │ The Parakeet model ALREADY outputs proper caps & punctuation!  │   │
+│  │ SHORT windows (5-7s) + OVERLAPS (2s) + TOKEN-LEVEL MERGE       │   │
 │  │                                                                 │   │
-│  │ We achieve correct formatting by:                              │   │
-│  │   • Retranscribing last 2-3 sentences + new audio              │   │
-│  │   • Model sees complete sentences → produces correct format    │   │
-│  │   • NO post-processing needed                                  │   │
+│  │ OLD (inefficient): Retranscribe 8-30s (last 2-3 sentences)     │   │
+│  │ NEW (v3): Short windows merged with token IDs & timestamps     │   │
 │  │                                                                 │   │
-│  │ Model output: "How are you today? I am fine."  (display as-is)│   │
+│  │ Model still handles caps/punct - we just merge smarter.        │   │
+│  │ NO post-processing, NO long context retranscription.           │   │
+│  │                                                                 │   │
+│  │ Result: Accurate + Fast streaming transcription                │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
