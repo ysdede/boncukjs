@@ -22,6 +22,59 @@ interface BufferVisualizerProps {
   visible?: boolean;
 }
 
+// Extracted Helper Functions
+export const drawWaveformPath = (
+  ctx: CanvasRenderingContext2D,
+  data: Float32Array,
+  width: number,
+  canvasHeight: number,
+  offsetX: number,
+  offsetY: number
+) => {
+  const centerY = canvasHeight / 2;
+  const numPoints = data.length / 2;
+  const step = width / numPoints;
+
+  ctx.beginPath();
+  for (let i = 0; i < numPoints; i++) {
+    const x = i * step + offsetX;
+    let minVal = data[i * 2];
+    let maxVal = data[i * 2 + 1];
+
+    let yMin = centerY - (minVal * centerY * 0.9) + offsetY;
+    let yMax = centerY - (maxVal * centerY * 0.9) + offsetY;
+
+    if (Math.abs(yMax - yMin) < 1) {
+      yMin = centerY - 0.5 + offsetY;
+      yMax = centerY + 0.5 + offsetY;
+    }
+
+    ctx.moveTo(x, yMin);
+    ctx.lineTo(x, yMax);
+  }
+  ctx.stroke();
+};
+
+export const drawAdaptiveThresholdLine = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  canvasHeight: number,
+  adaptiveThreshold: number,
+  offsetY: number,
+  color: string
+) => {
+  const centerY = canvasHeight / 2;
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 4]);
+  const adaptiveYPos = centerY - adaptiveThreshold * centerY + offsetY;
+  ctx.moveTo(0, adaptiveYPos); ctx.lineTo(width, adaptiveYPos);
+  const adaptiveYNeg = centerY + adaptiveThreshold * centerY + offsetY;
+  ctx.moveTo(0, adaptiveYNeg); ctx.lineTo(width, adaptiveYNeg);
+  ctx.stroke();
+};
+
 export const BufferVisualizer: Component<BufferVisualizerProps> = (props) => {
   // Canvas element ref
   let canvasRef: HTMLCanvasElement | undefined;
@@ -104,53 +157,26 @@ export const BufferVisualizer: Component<BufferVisualizerProps> = (props) => {
       // Draw waveform using Parakeet-UI logic (Etched Mercury Style)
       if (data.length >= 2) {
         // Data is already subsampled to ~400 points (min, max pairs)
-        const numPoints = data.length / 2;
-        const step = width / numPoints; // Use simple step as points ~ width/2
+        // numPoints and step are calculated inside helper now, passed data/width
 
         // Helper to draw the full waveform path
         // Optimized Waveform Path (Consolidated passes)
         ctx.lineCap = 'round';
 
-        // Helper to draw the full waveform path
-        const drawPath = (offsetX: number, offsetY: number) => {
-          if (!ctx) return;
-          ctx.beginPath();
-          for (let i = 0; i < numPoints; i++) {
-            const x = i * step + offsetX;
-            // Ensure min/max have at least 1px difference for visibility even when silent
-            let minVal = data[i * 2];
-            let maxVal = data[i * 2 + 1];
-
-            // Scaled values
-            let yMin = centerY - (minVal * centerY * 0.9) + offsetY;
-            let yMax = centerY - (maxVal * centerY * 0.9) + offsetY;
-
-            // Ensure tiny signals are visible (min 1px height)
-            if (Math.abs(yMax - yMin) < 1) {
-              yMin = centerY - 0.5 + offsetY;
-              yMax = centerY + 0.5 + offsetY;
-            }
-
-            ctx.moveTo(x, yMin);
-            ctx.lineTo(x, yMax);
-          }
-          ctx.stroke();
-        };
-
         // 1. Highlight Pass (Sharp top-left edge)
         ctx.strokeStyle = highlightColor;
         ctx.lineWidth = 1.0;
-        drawPath(-0.5, -0.5);
+        drawWaveformPath(ctx, data, width, canvasHeight, -0.5, -0.5);
 
         // 2. Shadow Pass (Depressed groove)
         ctx.strokeStyle = shadowColor;
         ctx.lineWidth = 1.2;
-        drawPath(0.5, 0.5);
+        drawWaveformPath(ctx, data, width, canvasHeight, 0.5, 0.5);
 
         // 3. Main Etch Pass (Base material) - Slate color for contrast
         ctx.strokeStyle = etchColor;
         ctx.lineWidth = 1.0;
-        drawPath(0, 0);
+        drawWaveformPath(ctx, data, width, canvasHeight, 0, 0);
 
         // 4. Active signal glow
         if (currentMetrics.isSpeaking) {
@@ -159,7 +185,7 @@ export const BufferVisualizer: Component<BufferVisualizerProps> = (props) => {
           ctx.shadowColor = signalActiveColor;
           ctx.strokeStyle = signalActiveColor;
           ctx.lineWidth = 1.0;
-          drawPath(0, 0);
+          drawWaveformPath(ctx, data, width, canvasHeight, 0, 0);
           ctx.shadowBlur = 0;
           ctx.globalAlpha = 1.0;
         }
@@ -170,21 +196,8 @@ export const BufferVisualizer: Component<BufferVisualizerProps> = (props) => {
         const snrRatio = Math.pow(10, snrThreshold() / 10);
         const adaptiveThreshold = currentMetrics.noiseFloor * snrRatio;
 
-        const drawThresholdLine = (offsetY: number, color: string) => {
-          if (!ctx) return;
-          ctx.beginPath();
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([2, 4]);
-          const adaptiveYPos = centerY - adaptiveThreshold * centerY + offsetY;
-          ctx.moveTo(0, adaptiveYPos); ctx.lineTo(width, adaptiveYPos);
-          const adaptiveYNeg = centerY + adaptiveThreshold * centerY + offsetY;
-          ctx.moveTo(0, adaptiveYNeg); ctx.lineTo(width, adaptiveYNeg);
-          ctx.stroke();
-        };
-
-        drawThresholdLine(1, highlightColor);
-        drawThresholdLine(0, shadowColor);
+        drawAdaptiveThresholdLine(ctx, width, canvasHeight, adaptiveThreshold, 1, highlightColor);
+        drawAdaptiveThresholdLine(ctx, width, canvasHeight, adaptiveThreshold, 0, shadowColor);
         ctx.setLineDash([]);
 
         // Label (Etched text)
