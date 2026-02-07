@@ -1,4 +1,4 @@
-import { Component, Index, createSignal, onCleanup, onMount } from 'solid-js';
+import { Component, For, createSignal, onCleanup, onMount } from 'solid-js';
 
 interface WaveformProps {
   audioLevel: number;
@@ -42,19 +42,19 @@ export const Waveform: Component<WaveformProps> = (props) => {
 
   return (
     <div class="flex items-end justify-center gap-1.5 h-12 w-full opacity-80 overflow-hidden">
-      <Index each={barHeights()}>
+      <For each={barHeights()}>
         {(height) => (
           <div
             class="w-1.5 rounded-full transition-all duration-150"
             style={{
-              height: `${Math.max(4, height() * 100)}%`,
+              height: `${Math.max(4, height * 100)}%`,
               'background-color': 'var(--color-primary)',
-              opacity: props.isRecording ? 0.4 + height() * 0.4 : 0.1,
+              opacity: props.isRecording ? 0.4 + height * 0.4 : 0.1,
               'box-shadow': props.isRecording ? '0 0 8px var(--color-primary)' : 'none'
             }}
           />
         )}
-      </Index>
+      </For>
     </div>
   );
 };
