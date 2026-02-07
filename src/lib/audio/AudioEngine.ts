@@ -49,11 +49,6 @@ export class AudioEngine implements IAudioEngine {
     private visualizationSummaryPosition: number = 0;
     private readonly VIS_SUMMARY_SIZE = 2000; // 2000 min/max pairs for 30 seconds = 15ms resolution
 
-    // Raw visualization buffer (still kept for higher-res requests if needed, but summary is preferred)
-    private visualizationBuffer: Float32Array | null = null;
-    private visualizationBufferPosition: number = 0;
-    private visualizationBufferSize: number = 0;
-
     // Metrics for UI components
     private metrics: AudioMetrics = {
         currentEnergy: 0,
@@ -121,12 +116,8 @@ export class AudioEngine implements IAudioEngine {
             energyRiseThreshold: 0.08
         });
 
-        // Initialize visualization buffer (30 seconds at target sample rate)
-        this.visualizationBufferSize = Math.round(this.targetSampleRate * VISUALIZATION_BUFFER_DURATION);
-        this.visualizationBuffer = new Float32Array(this.visualizationBufferSize);
-        this.visualizationBufferPosition = 0;
-
         // Initialize visualization summary (2000 points for 30s)
+        // Note: Raw visualization buffer removed in favor of summary buffer (performance)
         this.visualizationSummary = new Float32Array(this.VIS_SUMMARY_SIZE * 2);
         this.visualizationSummaryPosition = 0;
 
@@ -351,10 +342,10 @@ export class AudioEngine implements IAudioEngine {
         this.recentSegments = [];
 
         // Reset visualization buffer
-        if (this.visualizationBuffer) {
-            this.visualizationBuffer.fill(0);
+        if (this.visualizationSummary) {
+            this.visualizationSummary.fill(0);
         }
-        this.visualizationBufferPosition = 0;
+        this.visualizationSummaryPosition = 0;
 
         // Reset windowed streaming cursors
         for (const entry of this.windowCallbacks) {
@@ -727,32 +718,16 @@ export class AudioEngine implements IAudioEngine {
     }
 
     /**
-     * Update the visualization buffer and summary with new audio data.
+     * Update the visualization summary with new audio data.
      */
     private updateVisualizationBuffer(chunk: Float32Array): void {
-        if (!this.visualizationBuffer || !this.visualizationSummary) return;
+        if (!this.visualizationSummary) return;
 
         const chunkLength = chunk.length;
-        const bufferLength = this.visualizationBufferSize;
+        // Calculate buffer length (in samples) based on duration and sample rate
+        const bufferLength = Math.round(this.targetSampleRate * VISUALIZATION_BUFFER_DURATION);
 
-        // 1. Update raw circular buffer
-        if (chunkLength >= bufferLength) {
-            this.visualizationBuffer.set(chunk.subarray(chunkLength - bufferLength));
-            this.visualizationBufferPosition = 0;
-        } else {
-            const endPosition = this.visualizationBufferPosition + chunkLength;
-            if (endPosition <= bufferLength) {
-                this.visualizationBuffer.set(chunk, this.visualizationBufferPosition);
-                this.visualizationBufferPosition = endPosition % bufferLength;
-            } else {
-                const firstPart = bufferLength - this.visualizationBufferPosition;
-                this.visualizationBuffer.set(chunk.subarray(0, firstPart), this.visualizationBufferPosition);
-                this.visualizationBuffer.set(chunk.subarray(firstPart), 0);
-                this.visualizationBufferPosition = (chunkLength - firstPart) % bufferLength;
-            }
-        }
-
-        // 2. Update summary buffer (Low-res min/max pairs)
+        // Update summary buffer (Low-res min/max pairs)
         // Each point in VIS_SUMMARY_SIZE represents bufferLength / VIS_SUMMARY_SIZE samples
         const samplesPerPoint = bufferLength / this.VIS_SUMMARY_SIZE;
         const numNewPoints = Math.round(chunkLength / samplesPerPoint);
@@ -790,105 +765,31 @@ export class AudioEngine implements IAudioEngine {
             return new Float32Array(0);
         }
 
-        // If targetWidth is close to or less than our summary size, use the summary (MUCH faster)
-        if (targetWidth <= this.VIS_SUMMARY_SIZE) {
-            const subsampledBuffer = new Float32Array(targetWidth * 2);
-            const samplesPerTarget = this.VIS_SUMMARY_SIZE / targetWidth;
+        // Clamp width to summary size to avoid upsampling artifacts
+        const width = Math.min(targetWidth, this.VIS_SUMMARY_SIZE);
+        const subsampledBuffer = new Float32Array(width * 2);
+        const samplesPerTarget = this.VIS_SUMMARY_SIZE / width;
 
-            for (let i = 0; i < targetWidth; i++) {
-                const rangeStart = i * samplesPerTarget;
-                const rangeEnd = (i + 1) * samplesPerTarget;
-
-                let minVal = 0;
-                let maxVal = 0;
-                let first = true;
-
-                for (let s = Math.floor(rangeStart); s < Math.floor(rangeEnd); s++) {
-                    const idx = ((this.visualizationSummaryPosition + s) % this.VIS_SUMMARY_SIZE) * 2;
-                    const vMin = this.visualizationSummary[idx];
-                    const vMax = this.visualizationSummary[idx + 1];
-
-                    if (first) {
-                        minVal = vMin;
-                        maxVal = vMax;
-                        first = false;
-                    } else {
-                        if (vMin < minVal) minVal = vMin;
-                        if (vMax > maxVal) maxVal = vMax;
-                    }
-                }
-
-                subsampledBuffer[i * 2] = minVal;
-                subsampledBuffer[i * 2 + 1] = maxVal;
-            }
-            return subsampledBuffer;
-        }
-
-        return this.getVisualizationDataFromRaw(targetWidth);
-    }
-
-    private getVisualizationDataFromRaw(targetWidth: number): Float32Array {
-        if (!this.visualizationBuffer) return new Float32Array(0);
-        const buffer = this.visualizationBuffer;
-        const bufferLength = this.visualizationBufferSize;
-        const pos = this.visualizationBufferPosition;
-        const samplesPerPoint = bufferLength / targetWidth;
-        const subsampledBuffer = new Float32Array(targetWidth * 2);
-
-        // Logical index s maps to physical index:
-        // if s < wrapS: pos + s
-        // else: s - wrapS (which is s - (bufferLength - pos) = s + pos - bufferLength)
-        const wrapS = bufferLength - pos;
-
-        for (let i = 0; i < targetWidth; i++) {
-            const startS = Math.floor(i * samplesPerPoint);
-            const endS = Math.floor((i + 1) * samplesPerPoint);
+        for (let i = 0; i < width; i++) {
+            const rangeStart = i * samplesPerTarget;
+            const rangeEnd = (i + 1) * samplesPerTarget;
 
             let minVal = 0;
             let maxVal = 0;
             let first = true;
 
-            // Part 1: Before wrap (Logical indices < wrapS)
-            // Physical indices: pos + s
-            const end1 = (endS < wrapS) ? endS : wrapS;
-            if (startS < end1) {
-                let p = pos + startS;
-                const pEnd = pos + end1;
+            for (let s = Math.floor(rangeStart); s < Math.floor(rangeEnd); s++) {
+                const idx = ((this.visualizationSummaryPosition + s) % this.VIS_SUMMARY_SIZE) * 2;
+                const vMin = this.visualizationSummary[idx];
+                const vMax = this.visualizationSummary[idx + 1];
 
-                if (first && p < pEnd) {
-                    const val = buffer[p];
-                    minVal = val;
-                    maxVal = val;
+                if (first) {
+                    minVal = vMin;
+                    maxVal = vMax;
                     first = false;
-                    p++;
-                }
-
-                for (; p < pEnd; p++) {
-                    const val = buffer[p];
-                    if (val < minVal) minVal = val;
-                    else if (val > maxVal) maxVal = val;
-                }
-            }
-
-            // Part 2: After wrap (Logical indices >= wrapS)
-            // Physical indices: s - wrapS
-            const start2 = (startS > wrapS) ? startS : wrapS;
-            if (start2 < endS) {
-                let p = start2 - wrapS;
-                const pEnd = endS - wrapS;
-
-                if (first && p < pEnd) {
-                    const val = buffer[p];
-                    minVal = val;
-                    maxVal = val;
-                    first = false;
-                    p++;
-                }
-
-                for (; p < pEnd; p++) {
-                    const val = buffer[p];
-                    if (val < minVal) minVal = val;
-                    else if (val > maxVal) maxVal = val;
+                } else {
+                    if (vMin < minVal) minVal = vMin;
+                    if (vMax > maxVal) maxVal = vMax;
                 }
             }
 
