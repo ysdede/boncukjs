@@ -59,7 +59,6 @@ interface ProcessorState {
     speechStats: SegmentStats[];
     silenceStats: SegmentStats[];
     currentStats: CurrentStats;
-    segmentCounter: number;
     noiseFloor: number;
     recentEnergies: number[];
     silenceDuration: number;
@@ -526,7 +525,6 @@ export class AudioSegmentProcessor {
                 minSnrThreshold: this.options.minSnrThreshold,
                 energyRiseThreshold: this.options.energyRiseThreshold
             },
-            segmentCounter: 0,
             noiseFloor: 0.005,
             recentEnergies: [],
             silenceDuration: 0
