@@ -6,12 +6,18 @@ import { AudioSegmentProcessor, ProcessedSegment } from './AudioSegmentProcessor
  * Simple linear interpolation resampler for downsampling audio.
  * Good enough for speech recognition where we're going 48kHz -> 16kHz.
  */
-function resampleLinear(input: Float32Array, fromRate: number, toRate: number): Float32Array {
+function resampleLinear(input: Float32Array, fromRate: number, toRate: number, outputBuffer?: Float32Array): Float32Array {
     if (fromRate === toRate) return input;
 
     const ratio = fromRate / toRate;
     const outputLength = Math.floor(input.length / ratio);
-    const output = new Float32Array(outputLength);
+
+    let output: Float32Array;
+    if (outputBuffer && outputBuffer.length >= outputLength) {
+        output = outputBuffer.subarray(0, outputLength);
+    } else {
+        output = new Float32Array(outputLength);
+    }
 
     for (let i = 0; i < outputLength; i++) {
         const srcIndex = i * ratio;
@@ -38,6 +44,8 @@ export class AudioEngine implements IAudioEngine {
     private ringBuffer: IRingBuffer;
     private audioProcessor: AudioSegmentProcessor; // Replaces EnergyVAD
     private deviceId: string | null = null;
+
+    private resampleBuffer: Float32Array | null = null;
 
     // Cache last stats for UI
     private lastProcessorStats: any = null;
@@ -462,8 +470,18 @@ export class AudioEngine implements IAudioEngine {
     }
 
     private handleAudioChunk(rawChunk: Float32Array): void {
+        // Calculate needed size
+        const ratio = this.deviceSampleRate / this.targetSampleRate;
+        const neededSize = Math.floor(rawChunk.length / ratio);
+
+        // Resize buffer if needed (e.g. initial or rate change)
+        if (!this.resampleBuffer || this.resampleBuffer.length < neededSize) {
+            // Allocate slightly more (20% buffer) to avoid frequent reallocs if size fluctuates slightly
+            this.resampleBuffer = new Float32Array(Math.ceil(neededSize * 1.2));
+        }
+
         // 0. Resample from device rate to target rate (e.g., 48kHz -> 16kHz)
-        const chunk = resampleLinear(rawChunk, this.deviceSampleRate, this.targetSampleRate);
+        const chunk = resampleLinear(rawChunk, this.deviceSampleRate, this.targetSampleRate, this.resampleBuffer);
 
         // 0.5. Notify audio chunk subscribers (e.g., mel worker)
         for (const cb of this.audioChunkCallbacks) {
