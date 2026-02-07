@@ -193,7 +193,7 @@ export const BufferVisualizer: Component<BufferVisualizerProps> = (props) => {
 
         // Label (Etched text)
         ctx.fillStyle = isDarkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.2)';
-        ctx.font = '900 9px "JetBrains Mono", monospace';
+        ctx.font = '900 9px "JetBrains Mono Variable", monospace';
         const labelY = centerY - adaptiveThreshold * centerY - 8;
         ctx.fillText(`THRSH: ${snrThreshold().toFixed(1)}dB`, 10, labelY);
       }
@@ -289,7 +289,7 @@ export const BufferVisualizer: Component<BufferVisualizerProps> = (props) => {
 
         // Digital Readout
         ctx.fillStyle = isDarkMode ? '#f8fafc' : '#1e293b';
-        ctx.font = '900 10px "JetBrains Mono", monospace';
+        ctx.font = '900 10px "JetBrains Mono Variable", monospace';
         ctx.textAlign = 'right';
         ctx.fillText(`${currentMetrics.currentSNR.toFixed(0)}`, meterX - 8, thresholdMarkerY + 4);
         ctx.textAlign = 'left';
