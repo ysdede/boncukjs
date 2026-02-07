@@ -189,6 +189,12 @@ export function computeMelFrame(
     twiddles: { cos: Float64Array; sin: Float64Array },
     melFilterbank: Float32Array,
     nMels: number,
+    buffers?: {
+        fftRe: Float64Array;
+        fftIm: Float64Array;
+        power: Float32Array;
+        melFrame?: Float32Array;
+    }
 ): Float32Array {
     const { N_FFT, HOP_LENGTH, N_FREQ_BINS, LOG_ZERO_GUARD } = MEL_CONSTANTS;
     const pad = N_FFT >> 1; // 256
@@ -196,8 +202,8 @@ export function computeMelFrame(
     const preemphLen = preemphAudio.length;
 
     // Window the frame
-    const fftRe = new Float64Array(N_FFT);
-    const fftIm = new Float64Array(N_FFT);
+    const fftRe = buffers?.fftRe ?? new Float64Array(N_FFT);
+    const fftIm = buffers?.fftIm ?? new Float64Array(N_FFT);
     for (let k = 0; k < N_FFT; k++) {
         const idx = frameStart + k;
         const sample = (idx >= 0 && idx < preemphLen) ? preemphAudio[idx] : 0;
@@ -209,13 +215,13 @@ export function computeMelFrame(
     fft(fftRe, fftIm, N_FFT, twiddles);
 
     // Power spectrum
-    const power = new Float32Array(N_FREQ_BINS);
+    const power = buffers?.power ?? new Float32Array(N_FREQ_BINS);
     for (let k = 0; k < N_FREQ_BINS; k++) {
         power[k] = fftRe[k] * fftRe[k] + fftIm[k] * fftIm[k];
     }
 
     // Mel filterbank multiply + log
-    const melFrame = new Float32Array(nMels);
+    const melFrame = buffers?.melFrame ?? new Float32Array(nMels);
     for (let m = 0; m < nMels; m++) {
         let melVal = 0;
         const fbOff = m * N_FREQ_BINS;
