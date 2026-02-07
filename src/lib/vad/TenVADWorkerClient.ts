@@ -113,9 +113,7 @@ export class TenVADWorkerClient {
                 this.pendingPromises.delete(msg.id);
                 p.reject(new Error(msg.payload));
             } else {
-                // If the promise is missing, it was likely already rejected by worker.onerror
-                // or the client was disposed. Log as warn/debug instead of error to reduce noise.
-                console.warn('[TenVADWorkerClient] Received error for unknown/handled request:', msg.payload);
+                console.error('[TenVADWorkerClient] Unhandled error:', msg.payload);
             }
             return;
         }

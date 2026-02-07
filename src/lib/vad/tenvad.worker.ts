@@ -144,9 +144,7 @@ async function handleInit(id: number, cfg: { hopSize: number; threshold: number;
 
         respond({ type: 'INIT', id, payload: { success: true, version } });
     } catch (err) {
-        // Initialization failures are handled by the main thread (client rejects promise).
-        // Log as warn instead of error to reduce noise during tests where failure is expected.
-        console.warn('[TenVAD Worker] Init failed:', err);
+        console.error('[TenVAD Worker] Init failed:', err);
         respond({ type: 'ERROR', id, payload: `TEN-VAD init failed: ${err}` });
     }
 }
@@ -168,11 +166,24 @@ function handleProcess(samples: Float32Array, globalSampleOffset: number): void 
 
     let sampleIdx = 0;
 
+    // Cache memory views to avoid property access in hot loop
+    const heap16 = module!.HEAP16;
+    const heapF32 = module!.HEAPF32;
+    const heap32 = module!.HEAP32;
+    // Calculate audio buffer offset once (audioPtr is byte offset, HEAP16 uses int16 index)
+    const audioIdx = audioPtr >> 1;
+    const probIdx = probPtr >> 2;
+    const flagIdx = flagPtr >> 2;
+
     while (sampleIdx < samples.length) {
-        // Fill accumulator
-        while (accumulatorPos < hopSize && sampleIdx < samples.length) {
-            accumulator[accumulatorPos++] = samples[sampleIdx++];
-        }
+        // Fill accumulator using block copy (memcpy)
+        const available = samples.length - sampleIdx;
+        const needed = hopSize - accumulatorPos;
+        const toCopy = (available < needed) ? available : needed;
+
+        accumulator.set(samples.subarray(sampleIdx, sampleIdx + toCopy), accumulatorPos);
+        accumulatorPos += toCopy;
+        sampleIdx += toCopy;
 
         // If accumulator is full, run inference
         if (accumulatorPos >= hopSize) {
@@ -184,9 +195,13 @@ function handleProcess(samples: Float32Array, globalSampleOffset: number): void 
             }
 
             // Convert Float32 [-1, 1] to Int16 [-32768, 32767]
+            // Use local variable for loop speed
             for (let i = 0; i < hopSize; i++) {
-                const val = Math.max(-1, Math.min(1, accumulator[i]));
-                module!.HEAP16[(audioPtr >> 1) + i] = Math.round(val * 32767);
+                let s = accumulator[i];
+                // Clamp and scale
+                if (s < -1) s = -1;
+                else if (s > 1) s = 1;
+                heap16[audioIdx + i] = (s * 32767) | 0; // fast float to int
             }
 
             // Run inference
@@ -195,8 +210,8 @@ function handleProcess(samples: Float32Array, globalSampleOffset: number): void 
             );
 
             if (ret === 0) {
-                probabilities[hopCount] = module!.HEAPF32[probPtr >> 2];
-                flags[hopCount] = module!.HEAP32[flagPtr >> 2] as 0 | 1;
+                probabilities[hopCount] = heapF32[probIdx];
+                flags[hopCount] = heap32[flagIdx] as 0 | 1;
                 hopCount++;
             }
 
