@@ -7,7 +7,7 @@
  * Supports both v3 (token-stream) and v4 (utterance-based) pipelines.
  */
 
-import { ModelState, ModelProgress, TranscriptionResult } from './types';
+import { ModelState, ModelProgress, TranscriptionResult, TranscriptionServiceConfig } from './types';
 import { TokenStreamResult, TokenStreamConfig } from './TokenStreamTranscriber';
 import type { MergerResult, UtteranceBasedMergerConfig } from './UtteranceBasedMerger';
 
@@ -28,6 +28,44 @@ export interface V4ProcessResult {
 export interface V4IncrementalCache {
     cacheKey: string;
     prefixSeconds: number;
+}
+
+/** Valid message types for the worker bridge */
+export interface WorkerMessageMap {
+    INIT_MODEL: { payload: { modelId?: string }; response: void };
+    LOAD_LOCAL_MODEL: { payload: File[]; response: void };
+    INIT_SERVICE: { payload: { config: TranscriptionServiceConfig }; response: void };
+    INIT_V3_SERVICE: { payload: { config: TokenStreamConfig }; response: void };
+    PROCESS_CHUNK: { payload: Float32Array; response: TranscriptionResult };
+    PROCESS_V3_CHUNK: { payload: { audio: Float32Array; startTime?: number }; response: TokenStreamResult };
+    PROCESS_V3_CHUNK_WITH_FEATURES: {
+        payload: {
+            features: Float32Array;
+            T: number;
+            melBins: number;
+            startTime?: number;
+            overlapSeconds?: number;
+        };
+        response: TokenStreamResult;
+    };
+    TRANSCRIBE_SEGMENT: { payload: Float32Array; response: TranscriptionResult };
+    RESET: { payload: void; response: void };
+    FINALIZE: { payload: void; response: TranscriptionResult | TokenStreamResult | MergerResult | { text: string } };
+    INIT_V4_SERVICE: { payload: { config: Partial<UtteranceBasedMergerConfig> }; response: void };
+    PROCESS_V4_CHUNK_WITH_FEATURES: {
+        payload: {
+            features: Float32Array;
+            T: number;
+            melBins: number;
+            timeOffset?: number;
+            endTime?: number;
+            segmentId?: string;
+            incrementalCache?: V4IncrementalCache;
+        };
+        response: V4ProcessResult;
+    };
+    V4_FINALIZE_TIMEOUT: { payload: void; response: V4ProcessResult | null };
+    V4_RESET: { payload: void; response: void };
 }
 
 export class TranscriptionWorkerClient {
@@ -91,8 +129,12 @@ export class TranscriptionWorkerClient {
         }
     }
 
-    private sendRequest(type: string, payload?: any): Promise<any> {
+    private sendRequest<T extends keyof WorkerMessageMap>(
+        type: T,
+        ...args: WorkerMessageMap[T]['payload'] extends void ? [] : [WorkerMessageMap[T]['payload']]
+    ): Promise<WorkerMessageMap[T]['response']> {
         const id = this.messageId++;
+        const payload = args[0];
         return new Promise((resolve, reject) => {
             this.pendingPromises.set(id, { resolve, reject });
             this.worker.postMessage({ type, payload, id });
@@ -108,7 +150,7 @@ export class TranscriptionWorkerClient {
         return this.sendRequest('LOAD_LOCAL_MODEL', Array.from(files));
     }
 
-    async initService(config: any): Promise<void> {
+    async initService(config: TranscriptionServiceConfig): Promise<void> {
         return this.sendRequest('INIT_SERVICE', { config });
     }
 
