@@ -1,4 +1,4 @@
-import { Component, Show, createMemo, onMount, onCleanup } from 'solid-js';
+import { Component, Show, createMemo, createEffect } from 'solid-js';
 
 export interface TranscriptionDisplayProps {
     confirmedText: string;
@@ -30,17 +30,14 @@ export const TranscriptionDisplay: Component<TranscriptionDisplayProps> = (props
         (props.confirmedText?.length ?? 0) > 0 || (props.pendingText?.length ?? 0) > 0
     );
 
-    let observer: MutationObserver | undefined;
+    // Replace MutationObserver with createEffect to trigger scroll on text updates
+    createEffect(() => {
+        // Track text changes
+        props.confirmedText;
+        props.pendingText;
 
-    onMount(() => {
-        if (containerRef) {
-            observer = new MutationObserver(scrollToBottom);
-            observer.observe(containerRef, { childList: true, subtree: true });
-        }
-    });
-
-    onCleanup(() => {
-        observer?.disconnect();
+        // Trigger scroll (throttled by requestAnimationFrame inside scrollToBottom)
+        scrollToBottom();
     });
 
     return (
@@ -119,4 +116,3 @@ export const TranscriptionDisplay: Component<TranscriptionDisplayProps> = (props
 };
 
 export default TranscriptionDisplay;
-

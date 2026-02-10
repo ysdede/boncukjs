@@ -517,8 +517,10 @@ const App: Component = () => {
           const bufferConfig: BufferWorkerConfig = {
             sampleRate: 16000,
             layers: {
-              audio: { hopSamples: 1, entryDimension: 1, maxDurationSec: 120 },
-              mel: { hopSamples: 160, entryDimension: 128, maxDurationSec: 120 },
+              // audio and mel layers are currently unused in BufferWorker (data flows directly via MelWorker/AudioEngine)
+              // We keep them registered to satisfy type constraints but use minimal duration to save memory (~3.3MB)
+              audio: { hopSamples: 1, entryDimension: 1, maxDurationSec: 1 },
+              mel: { hopSamples: 160, entryDimension: 128, maxDurationSec: 1 },
               energyVad: { hopSamples: 1280, entryDimension: 1, maxDurationSec: 120 },
               inferenceVad: { hopSamples: 256, entryDimension: 1, maxDurationSec: 120 },
             },
