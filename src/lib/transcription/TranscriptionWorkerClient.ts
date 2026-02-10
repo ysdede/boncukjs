@@ -10,25 +10,15 @@
 import { ModelState, ModelProgress, TranscriptionResult } from './types';
 import { TokenStreamResult, TokenStreamConfig } from './TokenStreamTranscriber';
 import type { MergerResult, UtteranceBasedMergerConfig } from './UtteranceBasedMerger';
+import type {
+    WorkerMessage,
+    V4ProcessResult,
+    V4IncrementalCache,
+    V4TimeoutResult
+} from './WorkerMessages';
 
-/** Result from v4 utterance-based processing */
-export interface V4ProcessResult {
-    matureText: string;
-    immatureText: string;
-    matureCursorTime: number;
-    fullText: string;
-    metrics?: any;
-    totalSentences: number;
-    matureSentenceCount: number;
-    pendingSentence: string | null;
-    stats: any;
-}
-
-/** Incremental cache parameters for v4 transcription */
-export interface V4IncrementalCache {
-    cacheKey: string;
-    prefixSeconds: number;
-}
+// Re-export types for compatibility
+export type { V4ProcessResult, V4IncrementalCache, V4TimeoutResult };
 
 export class TranscriptionWorkerClient {
     private worker: Worker;
@@ -55,38 +45,36 @@ export class TranscriptionWorkerClient {
         };
     }
 
-    private handleMessage(data: any) {
-        const { type, payload, id } = data;
-
+    private handleMessage(data: WorkerMessage) {
         // Handle promise resolutions
-        if (id !== undefined && this.pendingPromises.has(id)) {
-            const { resolve, reject } = this.pendingPromises.get(id)!;
-            this.pendingPromises.delete(id);
+        if (data.id !== undefined && this.pendingPromises.has(data.id)) {
+            const { resolve, reject } = this.pendingPromises.get(data.id)!;
+            this.pendingPromises.delete(data.id);
 
-            if (type === 'ERROR') {
-                reject(new Error(payload));
+            if (data.type === 'ERROR') {
+                reject(new Error(data.payload));
             } else {
-                resolve(payload);
+                resolve(data.payload);
             }
             return;
         }
 
         // Handle reactive notifications
-        switch (type) {
+        switch (data.type) {
             case 'MODEL_PROGRESS':
-                this.onModelProgress?.(payload);
+                this.onModelProgress?.(data.payload);
                 break;
             case 'MODEL_STATE':
-                this.onModelStateChange?.(payload);
+                this.onModelStateChange?.(data.payload);
                 break;
             case 'V3_CONFIRMED':
-                this.onV3Confirmed?.(payload.text, payload.words);
+                this.onV3Confirmed?.(data.payload.text, data.payload.words);
                 break;
             case 'V3_PENDING':
-                this.onV3Pending?.(payload.text, payload.words);
+                this.onV3Pending?.(data.payload.text, data.payload.words);
                 break;
             case 'ERROR':
-                this.onError?.(payload);
+                this.onError?.(data.payload);
                 break;
         }
     }
@@ -181,7 +169,7 @@ export class TranscriptionWorkerClient {
      * Trigger timeout-based finalization of the pending sentence in the merger.
      * Call this when VAD detects extended silence.
      */
-    async v4FinalizeTimeout(): Promise<V4ProcessResult | null> {
+    async v4FinalizeTimeout(): Promise<V4TimeoutResult | null> {
         return this.sendRequest('V4_FINALIZE_TIMEOUT');
     }
 
