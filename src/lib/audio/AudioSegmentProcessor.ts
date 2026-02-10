@@ -166,19 +166,36 @@ export class AudioSegmentProcessor {
         const segments: ProcessedSegment[] = [];
         const isSpeech = energy > this.options.energyThreshold;
 
-        // Update silence duration tracking
-        if (!isSpeech) {
-            const chunkDurationSec = chunk.length / this.options.sampleRate;
-            this.state.silenceDuration += chunkDurationSec;
-        } else {
-            this.state.silenceDuration = 0;
-        }
+        this.updateSilenceTracking(chunk.length, isSpeech);
 
         // Update noise floor and calculate SNR
         this.updateNoiseFloor(energy, isSpeech);
         const snr = this.calculateSNR(energy);
 
         // Track recent chunks for lookback
+        this.trackRecentChunk(currentTime, energy, isSpeech, snr);
+
+        // --- Proactive Segment Splitting ---
+        this.handleProactiveSplitting(currentTime, energy, segments);
+
+        // --- Speech State Machine ---
+        this.updateStateMachine(currentTime, energy, snr, isSpeech, segments);
+
+        this.updateStats();
+
+        return segments;
+    }
+
+    private updateSilenceTracking(chunkLength: number, isSpeech: boolean): void {
+        if (!isSpeech) {
+            const chunkDurationSec = chunkLength / this.options.sampleRate;
+            this.state.silenceDuration += chunkDurationSec;
+        } else {
+            this.state.silenceDuration = 0;
+        }
+    }
+
+    private trackRecentChunk(currentTime: number, energy: number, isSpeech: boolean, snr: number): void {
         this.state.recentChunks.push({
             time: currentTime,
             energy,
@@ -189,8 +206,9 @@ export class AudioSegmentProcessor {
         if (this.state.recentChunks.length > this.options.maxHistoryLength * 10) {
             this.state.recentChunks.shift();
         }
+    }
 
-        // --- Proactive Segment Splitting ---
+    private handleProactiveSplitting(currentTime: number, energy: number, segments: ProcessedSegment[]): void {
         if (this.state.inSpeech && this.state.speechStartTime !== null) {
             const currentSpeechDuration = currentTime - this.state.speechStartTime;
             if (currentSpeechDuration > this.options.maxSegmentDuration) {
@@ -209,90 +227,109 @@ export class AudioSegmentProcessor {
                 this.startSpeech(currentTime, energy);
             }
         }
+    }
 
-        // --- Speech State Machine ---
+    private updateStateMachine(
+        currentTime: number,
+        energy: number,
+        snr: number,
+        isSpeech: boolean,
+        segments: ProcessedSegment[]
+    ): void {
         if (!this.state.inSpeech && isSpeech) {
-            // Transition: Silence -> Speech
-            const realStartIndex = this.findSpeechStart();
-            const realStartTime = realStartIndex !== -1
-                ? this.state.recentChunks[realStartIndex].time
-                : currentTime;
-
-            this.startSpeech(realStartTime, energy);
-
-            this.log('Speech start detected', {
-                detectedAt: currentTime.toFixed(2),
-                actualStart: realStartTime.toFixed(2),
-                lookbackDiff: (currentTime - realStartTime).toFixed(2),
-                snr: snr.toFixed(2),
-                noiseFloor: this.state.noiseFloor.toFixed(6)
-            });
+            this.handleSilenceToSpeech(currentTime, energy, snr);
         } else if (this.state.inSpeech && !isSpeech) {
-            // Transition: Speech -> potentially Silence
-            this.state.silenceCounter++;
-
-            const chunksNeeded = Math.ceil(this.options.silenceThreshold / (this.options.windowSize / this.options.sampleRate));
-
-            if (this.state.silenceCounter % 5 === 0) {
-                this.log('Silence progressing', {
-                    counter: this.state.silenceCounter,
-                    needed: chunksNeeded,
-                    energy: energy.toFixed(6),
-                    snr: snr.toFixed(2)
-                });
-            }
-
-            // Implement ending speech tolerance and max silence within speech
-            const silenceDuration = this.state.silenceCounter * (this.options.windowSize / this.options.sampleRate);
-            const isConfirmedSilence = this.state.silenceCounter >= chunksNeeded;
-
-            // Check if we should allow some silence within speech
-            if (silenceDuration < this.options.maxSilenceWithinSpeech) {
-                // Not yet enough silence to consider it a break
-                this.state.speechEnergies.push(energy);
-            } else if (isConfirmedSilence) {
-                // Confirmed silence - end speech segment
-                if (this.state.speechStartTime !== null) {
-                    const speechDuration = currentTime - this.state.speechStartTime;
-                    const avgEnergy = this.state.speechEnergies.length > 0
-                        ? this.state.speechEnergies.reduce((a, b) => a + b, 0) / this.state.speechEnergies.length
-                        : 0;
-
-                    this.state.speechStats.push({
-                        startTime: this.state.speechStartTime,
-                        endTime: currentTime,
-                        duration: speechDuration,
-                        avgEnergy,
-                        energyIntegral: avgEnergy * speechDuration
-                    });
-
-                    if (this.state.speechStats.length > this.options.maxHistoryLength) {
-                        this.state.speechStats.shift();
-                    }
-                }
-
-                const segment = this.createSegment(this.state.speechStartTime!, currentTime);
-                if (segment) {
-                    segments.push(segment);
-                }
-
-                this.startSilence(currentTime);
-            } else {
-                // Accumulate silence energies while deciding
-                this.state.silenceEnergies.push(energy);
-            }
+            this.handleSpeechToSilence(currentTime, energy, snr, segments);
         } else {
-            // Continue in current state
-            if (this.state.inSpeech) {
-                this.state.speechEnergies.push(energy);
-            } else {
-                this.state.silenceEnergies.push(energy);
+            this.handleStateContinuation(energy);
+        }
+    }
+
+    private handleSilenceToSpeech(currentTime: number, energy: number, snr: number): void {
+        const realStartIndex = this.findSpeechStart();
+        const realStartTime = realStartIndex !== -1
+            ? this.state.recentChunks[realStartIndex].time
+            : currentTime;
+
+        this.startSpeech(realStartTime, energy);
+
+        this.log('Speech start detected', {
+            detectedAt: currentTime.toFixed(2),
+            actualStart: realStartTime.toFixed(2),
+            lookbackDiff: (currentTime - realStartTime).toFixed(2),
+            snr: snr.toFixed(2),
+            noiseFloor: this.state.noiseFloor.toFixed(6)
+        });
+    }
+
+    private handleSpeechToSilence(
+        currentTime: number,
+        energy: number,
+        snr: number,
+        segments: ProcessedSegment[]
+    ): void {
+        this.state.silenceCounter++;
+
+        const chunksNeeded = Math.ceil(this.options.silenceThreshold / (this.options.windowSize / this.options.sampleRate));
+
+        if (this.state.silenceCounter % 5 === 0) {
+            this.log('Silence progressing', {
+                counter: this.state.silenceCounter,
+                needed: chunksNeeded,
+                energy: energy.toFixed(6),
+                snr: snr.toFixed(2)
+            });
+        }
+
+        // Implement ending speech tolerance and max silence within speech
+        const silenceDuration = this.state.silenceCounter * (this.options.windowSize / this.options.sampleRate);
+        const isConfirmedSilence = this.state.silenceCounter >= chunksNeeded;
+
+        // Check if we should allow some silence within speech
+        if (silenceDuration < this.options.maxSilenceWithinSpeech) {
+            // Not yet enough silence to consider it a break
+            this.state.speechEnergies.push(energy);
+        } else if (isConfirmedSilence) {
+            this.finishSpeechSegment(currentTime, segments);
+            this.startSilence(currentTime);
+        } else {
+            // Accumulate silence energies while deciding
+            this.state.silenceEnergies.push(energy);
+        }
+    }
+
+    private finishSpeechSegment(currentTime: number, segments: ProcessedSegment[]): void {
+        if (this.state.speechStartTime !== null) {
+            const speechDuration = currentTime - this.state.speechStartTime;
+            const avgEnergy = this.state.speechEnergies.length > 0
+                ? this.state.speechEnergies.reduce((a, b) => a + b, 0) / this.state.speechEnergies.length
+                : 0;
+
+            this.state.speechStats.push({
+                startTime: this.state.speechStartTime,
+                endTime: currentTime,
+                duration: speechDuration,
+                avgEnergy,
+                energyIntegral: avgEnergy * speechDuration
+            });
+
+            if (this.state.speechStats.length > this.options.maxHistoryLength) {
+                this.state.speechStats.shift();
             }
         }
 
-        this.updateStats();
+        const segment = this.createSegment(this.state.speechStartTime!, currentTime);
+        if (segment) {
+            segments.push(segment);
+        }
+    }
 
-        return segments;
+    private handleStateContinuation(energy: number): void {
+        if (this.state.inSpeech) {
+            this.state.speechEnergies.push(energy);
+        } else {
+            this.state.silenceEnergies.push(energy);
+        }
     }
 
     /**
