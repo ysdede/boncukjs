@@ -34,7 +34,7 @@
     "@thisbeyond/solid-dnd": "^0.7.5",
     "material-icons": "^1.13.14",
     "onnxruntime-web": "1.24.1",
-    "parakeet.js": "^1.0.1",
+    "parakeet.js": "1.2.1",
     "solid-js": "^1.9.5",
     "uuid": "^11.1.0",
     "wink-eng-lite-web-model": "^1.8.1",
