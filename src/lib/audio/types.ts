@@ -35,7 +35,7 @@ export interface AudioEngineConfig {
     /** Preferred device ID (optional) */
     deviceId?: string;
 
-    // Advanced VAD properties matching parakeet-ui
+    // Advanced VAD properties matching legacy UI project
     lookbackDuration?: number;
     overlapDuration?: number;
     speechHangover?: number;

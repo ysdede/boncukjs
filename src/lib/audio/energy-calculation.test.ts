@@ -2,7 +2,7 @@
  * Unit tests for the VAD energy calculation: Peak Amplitude + 6-sample SMA.
  *
  * Matches the logic in AudioEngine (vad-correction-peak-energy fix).
- * parakeet-ui uses peak + 6-sample SMA; RMS was causing all-audio-marked-as-silence.
+ * legacy UI project uses peak + 6-sample SMA; RMS was causing all-audio-marked-as-silence.
  *
  * Run: npm test
  */

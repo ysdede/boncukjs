@@ -1,4 +1,4 @@
-# Boncuk.js
+# Keet
 
 Real-time speech-to-text transcription in the browser, powered by [Parakeet.js](https://github.com/ysdede/parakeet.js).
 
@@ -6,7 +6,7 @@ Real-time speech-to-text transcription in the browser, powered by [Parakeet.js](
 
 ## Overview
 
-Boncuk.js is a real-time speech-to-text application built with SolidJS, Vite, and Tailwind CSS. It runs NVIDIA NeMo Parakeet TDT models in the browser via WebGPU/WASM through Parakeet.js, with no backend required.
+Keet is a real-time speech-to-text application built with SolidJS, Vite, and Tailwind CSS. It runs NVIDIA NeMo Parakeet TDT models in the browser via WebGPU/WASM through Parakeet.js, with no backend required.
 
 **Default pipeline (v4):** Utterance-based streaming with a centralized BufferWorker (multi-layer time-aligned buffer), TEN-VAD (WASM) for inference VAD, and HybridVAD (energy-based) for UI. WindowBuilder and UtteranceBasedMerger handle sentence finalization and mature/immature text. Legacy per-utterance (VAD-defined segments) mode is still available. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 

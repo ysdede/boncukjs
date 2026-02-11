@@ -1,5 +1,5 @@
 /**
- * BoncukJS v2.0 - Transcription Types
+ * Keet v2.0 - Transcription Types
  */
 
 export type ModelState = 'unloaded' | 'loading' | 'ready' | 'error';

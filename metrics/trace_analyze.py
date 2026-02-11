@@ -1,5 +1,5 @@
 import ijson, re, json, sys, traceback, time
-p=r'N:\\github\\ysdede\\boncukjs\\metrics\\trace_boncuk-tracing.json'
+p=r'N:\\github\\ysdede\\keet\\metrics\\trace-keet-tracing.json'
 
 start=time.time()
 thread_name={}

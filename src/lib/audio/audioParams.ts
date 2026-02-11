@@ -1,6 +1,6 @@
 /**
- * BoncukJS - Audio Processing Parameters
- * Ported from parakeet-ui/config/audioParams.js
+ * Keet - Audio Processing Parameters
+ * Ported from legacy UI project/config/audioParams.js
  * 
  * Contains all parameters for Voice Activity Detection (VAD) and segment processing.
  * Values are sample-rate-aligned to ensure exact integer sample counts.

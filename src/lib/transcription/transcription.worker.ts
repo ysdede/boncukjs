@@ -1,5 +1,5 @@
 /**
- * BoncukJS v4.0 - Transcription Web Worker
+ * Keet v4.0 - Transcription Web Worker
  * 
  * Runs heavy AI inference and text merging in a background thread
  * to prevent UI stuttering on the main thread.

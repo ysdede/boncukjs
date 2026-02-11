@@ -1,4 +1,4 @@
-# Boncukjs Performance Profile Report
+# Keet Performance Profile Report
 
 Profile captured with Chrome DevTools MCP (trace with reload).  
 Trace file: `performance-trace.json.gz`

@@ -1,6 +1,6 @@
 {
-    "name": "BoncukJS",
-    "short_name": "BoncukJS",
+    "name": "Keet",
+    "short_name": "Keet",
     "description": "Privacy-first real-time transcription. Your audio stays on your device.",
     "start_url": "/",
     "display": "standalone",

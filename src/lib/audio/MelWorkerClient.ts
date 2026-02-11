@@ -1,5 +1,5 @@
 /**
- * BoncukJS - Mel Worker Client
+ * Keet - Mel Worker Client
  * 
  * Manages the mel producer Web Worker lifecycle and provides a promise-based API.
  * 

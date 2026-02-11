@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const TRACE_FILE = 'N:\\github\\ysdede\\boncukjs\\metrics\\trace_boncuk-tracing.json';
+const TRACE_FILE = path.resolve(__dirname, 'trace-keet-tracing.json');
 
 try {
     console.log('Reading trace file...');

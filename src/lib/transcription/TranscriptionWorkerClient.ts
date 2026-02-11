@@ -1,5 +1,5 @@
 /**
- * BoncukJS v4.0 - Transcription Worker Client
+ * Keet v4.0 - Transcription Worker Client
  * 
  * Main thread bridge to the Transcription Web Worker.
  * Offloads heavy AI transcription to a background thread to prevent UI stutters.

@@ -1,5 +1,5 @@
 /**
- * BoncukJS v2.0 - Type Definitions
+ * Keet v2.0 - Type Definitions
  * 
  * Core types for the transcription application.
  * Based on architecture.md specifications.

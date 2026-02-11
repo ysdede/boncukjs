@@ -1,6 +1,6 @@
 /**
- * BoncukJS - Audio Segment Processor
- * Ported from parakeet-ui/AudioSegmentProcessor.js
+ * Keet - Audio Segment Processor
+ * Ported from legacy UI project/AudioSegmentProcessor.js
  * 
  * Sophisticated VAD-based segment processor with:
  * - Speech onset detection with lookback

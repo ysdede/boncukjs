@@ -1,6 +1,6 @@
-# Local Development Setup for boncukjs + parakeet.js
+# Local Development Setup for keet + parakeet.js
 
-This guide explains how to develop boncukjs while simultaneously making changes to the parakeet.js library.
+This guide explains how to develop keet while simultaneously making changes to the parakeet.js library.
 
 ## Prerequisites
 
@@ -8,7 +8,7 @@ Ensure your folder structure looks like this:
 
 ```
 github/ysdede/
-├── boncukjs/          # This project
+├── keet/              # This project
 └── parakeet.js/       # The parakeet.js library source
 ```
 
@@ -17,8 +17,8 @@ github/ysdede/
 ### 1. Install dependencies in both projects
 
 ```bash
-# In boncukjs
-cd boncukjs
+# In keet
+cd keet
 npm install
 
 # In parakeet.js (if not already done)
@@ -82,8 +82,8 @@ When starting the dev server, you'll see:
 ### "LOCAL mode requested but parakeet.js not found"
 
 Make sure the folder structure is correct:
-- `boncukjs` and `parakeet.js` must be sibling directories
-- The path should be `../parakeet.js/src/index.js` relative to boncukjs
+- `keet` and `parakeet.js` must be sibling directories
+- The path should be `../parakeet.js/src/index.js` relative to keet
 
 ### HTTPS Certificate Errors
 
@@ -99,7 +99,7 @@ mkcert -install
 mkcert localhost
 ```
 
-Place `localhost.pem` and `localhost-key.pem` in the boncukjs root.
+Place `localhost.pem` and `localhost-key.pem` in the keet root.
 
 ### Model Loading Issues
 
@@ -109,7 +109,7 @@ If models fail to load in local mode, ensure:
 
 ## Version Compatibility
 
-| boncukjs | parakeet.js | onnxruntime-web |
+| keet | parakeet.js | onnxruntime-web |
 |----------|-------------|-----------------|
 | 0.1.0    | 1.0.1       | 1.22.0-dev.20250409-89f8206ba4 |
 

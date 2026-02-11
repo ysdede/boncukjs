@@ -1,5 +1,5 @@
 /**
- * BoncukJS v2.0 - Transcription Service
+ * Keet v2.0 - Transcription Service
  * 
  * High-level service for real-time transcription using parakeet.js
  * StatefulStreamingTranscriber. No complex merging logic required!

@@ -1,5 +1,5 @@
 /**
- * BoncukJS v3.0 - Transcription Module
+ * Keet v3.0 - Transcription Module
  */
 
 export * from './types';

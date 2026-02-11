@@ -1,7 +1,7 @@
 /**
-"""""""""" * BoncukJS - Buffer Visualizer Component
+"""""""""" * Keet - Buffer Visualizer Component
  * Canvas-based real-time audio waveform visualization.
- * Ported from parakeet-ui (Svelte) to SolidJS.
+ * Ported from legacy UI project (Svelte) to SolidJS.
  */
 
 import { Component, createSignal, onMount, onCleanup, createEffect } from 'solid-js';
@@ -105,7 +105,7 @@ export const BufferVisualizer: Component<BufferVisualizerProps> = (props) => {
         drawSegments(width, canvasHeight, isDarkMode);
       }
 
-      // Draw waveform using Parakeet-UI logic (Etched Mercury Style)
+      // Draw waveform using legacy UI project logic (Etched Mercury Style)
       if (data.length >= 2) {
         // Data is already subsampled to ~400 points (min, max pairs)
         const numPoints = data.length / 2;

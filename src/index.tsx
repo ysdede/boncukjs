@@ -1,5 +1,5 @@
 /**
- * BoncukJS v2.0 - Entry Point
+ * Keet v2.0 - Entry Point
  * 
  * Privacy-first, offline-capable real-time transcription.
  */

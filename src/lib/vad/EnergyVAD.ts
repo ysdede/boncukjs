@@ -2,7 +2,7 @@ import { EnergyVADConfig, VADResult } from './types';
 
 /**
  * EnergyVAD implements SNR-based Voice Activity Detection with adaptive noise floor tracking.
- * Ported from parakeet-ui's AudioSegmentProcessor for robust speech detection.
+ * Ported from legacy UI project's AudioSegmentProcessor for robust speech detection.
  * 
  * Features:
  * - Adaptive noise floor with fast/slow adaptation rates
@@ -21,12 +21,12 @@ export class EnergyVAD {
     private minSpeechFrames: number;
     private minSilenceFrames: number;
     
-    // Adaptive noise floor tracking (from parakeet-ui)
+    // Adaptive noise floor tracking (from legacy UI project)
     private noiseFloor: number = 0.005; // Initial estimate (lower for better sensitivity)
     private snr: number = 0;
     private silenceDuration: number = 0; // Track silence duration for adaptation rate
 
-    // Adaptation rates (from parakeet-ui/audioParams.js)
+    // Adaptation rates (from legacy UI project/audioParams.js)
     private readonly noiseFloorAdaptationRate = 0.05; // Standard EMA rate
     private readonly fastAdaptationRate = 0.15; // Fast rate for initial calibration
     private readonly minBackgroundDuration = 1.0; // Seconds before switching to slow adaptation
@@ -47,7 +47,7 @@ export class EnergyVAD {
 
     /**
      * Process an audio chunk and return the VAD state.
-     * Uses SNR-based detection with adaptive noise floor (from parakeet-ui).
+     * Uses SNR-based detection with adaptive noise floor (from legacy UI project).
      * @param chunk - Float32Array of mono PCM samples
      */
     process(chunk: Float32Array): VADResult {
@@ -69,7 +69,7 @@ export class EnergyVAD {
         const isAboveEnergyThreshold = energy > this.config.energyThreshold;
         const isSpeech = isAboveSnrThreshold || isAboveEnergyThreshold;
 
-        // 4. Update noise floor adaptively (from parakeet-ui)
+        // 4. Update noise floor adaptively (from legacy UI project)
         if (!isSpeech) {
             // Track silence duration for adaptation rate blending
             this.silenceDuration += chunkDuration;

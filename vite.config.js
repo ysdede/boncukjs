@@ -8,7 +8,7 @@ import tailwindcss from '@tailwindcss/vite'
 // Check if we should use local parakeet.js
 const useLocalParakeet = process.env.USE_LOCAL_PARAKEET === 'true';
 
-// Path to local parakeet.js (relative to boncukjs)
+// Path to local parakeet.js (relative to keet)
 const localParakeetPath = path.resolve(__dirname, '../parakeet.js');
 
 // Check if local parakeet.js exists
@@ -22,7 +22,7 @@ function readJson(filePath) {
   }
 }
 
-const boncukPkg = readJson(path.resolve(__dirname, 'package.json'));
+const keetPkg = readJson(path.resolve(__dirname, 'package.json'));
 const localParakeetPkg = localParakeetExists ? readJson(path.resolve(localParakeetPath, 'package.json')) : null;
 const npmParakeetPkg = readJson(path.resolve(__dirname, 'node_modules/parakeet.js/package.json'));
 
@@ -35,7 +35,7 @@ if (!parakeetVersion) {
   parakeetSource = localVersion ? 'local (fallback)' : 'unknown';
 }
 
-const onnxVersion = boncukPkg?.dependencies?.['onnxruntime-web'] || 'unknown';
+const onnxVersion = keetPkg?.dependencies?.['onnxruntime-web'] || 'unknown';
 
 if (useLocalParakeet) {
   if (localParakeetExists) {
@@ -44,7 +44,7 @@ if (useLocalParakeet) {
     console.error('LOCAL mode requested but parakeet.js not found at:', localParakeetPath);
     console.error('   Expected folder structure:');
     console.error('   └── github/ysdede/');
-    console.error('       ├── boncukjs/');
+    console.error('       ├── keet/');
     console.error('       └── parakeet.js/');
     process.exit(1);
   }

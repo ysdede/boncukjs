@@ -77,10 +77,10 @@ export class AudioEngine implements IAudioEngine {
         this.config = {
             sampleRate: 16000,
             bufferDuration: 120,
-            energyThreshold: 0.08, // Match Parakeet-UI 'medium'
-            minSpeechDuration: 240, // Match Parakeet-UI
-            minSilenceDuration: 400, // Match Parakeet-UI
-            maxSegmentDuration: 4.8, // Match Parakeet-UI
+            energyThreshold: 0.08, // Match legacy UI project 'medium'
+            minSpeechDuration: 240, // Match legacy UI project
+            minSilenceDuration: 400, // Match legacy UI project
+            maxSegmentDuration: 4.8, // Match legacy UI project
 
             // Advanced VAD defaults
             lookbackDuration: 0.120,
@@ -329,7 +329,7 @@ export class AudioEngine implements IAudioEngine {
 
     /**
      * Reset buffers and VAD state for a new session while keeping the audio graph.
-     * Aligns visualization + segment timebase to 0, matching parakeet-ui behavior.
+     * Aligns visualization + segment timebase to 0, matching legacy UI project behavior.
      */
     reset(): void {
         // Reset audio/VAD state
@@ -488,7 +488,7 @@ export class AudioEngine implements IAudioEngine {
             }
         }
 
-        // SMA Smoothing (matching Parakeet-UI logic)
+        // SMA Smoothing (matching legacy UI project logic)
         this.energyHistory.push(maxAbs);
         if (this.energyHistory.length > 6) {
             this.energyHistory.shift();
@@ -536,7 +536,7 @@ export class AudioEngine implements IAudioEngine {
         // 3. Handle segments
         if (segments.length > 0) {
             for (const seg of segments) {
-                // Apply lookback and overlap adjustments matching parakeet-ui
+                // Apply lookback and overlap adjustments matching legacy UI project
                 const lookbackDuration = this.config.lookbackDuration ?? 0.120;
                 const startTime = Math.max(0, seg.startTime - lookbackDuration);
 

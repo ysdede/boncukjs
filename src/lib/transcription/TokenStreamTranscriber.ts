@@ -1,5 +1,5 @@
 /**
- * BoncukJS v3.0 - Token Stream Transcriber
+ * Keet v3.0 - Token Stream Transcriber
  * 
  * Uses LCSPTFAMerger for overlapping window transcription with
  * token-level merging (NeMo LCS + PTFA enhancements).

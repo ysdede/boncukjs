@@ -1,5 +1,5 @@
 /**
- * BoncukJS v3.0 - App Store
+ * Keet v3.0 - App Store
  * 
  * Central state management using SolidJS signals.
  * Manages recording state, model status, and transcript.

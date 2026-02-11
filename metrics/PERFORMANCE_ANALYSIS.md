@@ -1,7 +1,7 @@
-# Boncukjs Performance Trace Analysis
+# Keet Performance Trace Analysis
 
 **Date:** Feb 7, 2026
-**Trace:** `metrics/trace_boncuk-tracing.json` (Chrome detailed tracing)
+**Trace:** `metrics/trace-keet-tracing.json` (Chrome detailed tracing)
 **Duration:** 93.4s | **Events analyzed:** 1,161,562
 
 ## Process/Thread Map
@@ -198,7 +198,7 @@ The max frame interval of 485.7ms indicates at least one significant stall. Aver
 # Place the trace file in metrics/ directory
 
 # Run the analyzer:
-python metrics/analyze_chrome_trace.py metrics/trace_boncuk-tracing.json
+python metrics/analyze_chrome_trace.py metrics/trace-keet-tracing.json
 
 # For a custom trace file:
 python metrics/analyze_chrome_trace.py path/to/your/trace.json

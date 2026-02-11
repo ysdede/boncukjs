@@ -5,7 +5,7 @@
  * Provides both NLP-based and heuristic fallback methods for sentence
  * boundary detection in transcription data.
  *
- * Ported from parakeet-ui/src/utils/SentenceBoundaryDetector.js to TypeScript.
+ * Ported from legacy UI project/src/utils/SentenceBoundaryDetector.js to TypeScript.
  */
 
 import winkNLP from 'wink-nlp';

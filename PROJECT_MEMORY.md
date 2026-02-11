@@ -1,6 +1,6 @@
 # Project Memory (Serena / agent context)
 
-This file records high-level decisions and recent work for multi-agent context. **Serena MCP is configured and boncukjs is registered to it.** When an agent has access to Serena MCP, use `mcp_serena_write_memory` to store or sync the points below. Otherwise, agents read this file for context.
+This file records high-level decisions and recent work for multi-agent context. **Serena MCP is configured and keet is registered to it.** When an agent has access to Serena MCP, use `mcp_serena_write_memory` to store or sync the points below. Otherwise, agents read this file for context.
 
 ---
 
@@ -32,7 +32,7 @@ This file records high-level decisions and recent work for multi-agent context. 
 **Serena summary (paste into mcp_serena_write_memory):**
 
 ```
-boncukjs (refactor/streaming-merger): Real-time STT in browser (SolidJS, Parakeet.js). Mel spectrogram uses black-to-red heatmap. Waveform uses fixed gain 4 and clamp to avoid jumps. TenVAD: worker + TenVADWorkerClient + public/wasm. BufferWorker: multi-layer (audio, mel, energyVad, inferenceVad), BufferWorkerClient, fire-and-forget writes, promise reads. Debug panel: LayeredBufferVisualizer (melClient, 8s), auto-scroll finalized sentences, stable VAD/Silero/SNR UI. Vitest pool: forks. Workers: mel, transcription, buffer, tenvad; main thread coordinates.
+keet (refactor/streaming-merger): Real-time STT in browser (SolidJS, Parakeet.js). Mel spectrogram uses black-to-red heatmap. Waveform uses fixed gain 4 and clamp to avoid jumps. TenVAD: worker + TenVADWorkerClient + public/wasm. BufferWorker: multi-layer (audio, mel, energyVad, inferenceVad), BufferWorkerClient, fire-and-forget writes, promise reads. Debug panel: LayeredBufferVisualizer (melClient, 8s), auto-scroll finalized sentences, stable VAD/Silero/SNR UI. Vitest pool: forks. Workers: mel, transcription, buffer, tenvad; main thread coordinates.
 ```
 
 Last updated: 2026-02-07 (after refactor/streaming-merger commits: TenVAD, BufferWorker, Debug panel, mel heatmap, waveform scaling, test config, WindowBuilder comment).

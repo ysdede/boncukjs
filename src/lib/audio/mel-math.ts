@@ -1,5 +1,5 @@
 /**
- * BoncukJS - Mel Spectrogram Math
+ * Keet - Mel Spectrogram Math
  * 
  * Pure computation functions for mel spectrogram feature extraction.
  * Matches NeMo / onnx-asr / parakeet.js mel.js exactly.

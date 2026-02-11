@@ -5,7 +5,7 @@
  * utterance texts. Sentences are detected via winkNLP and finalized once a
  * following sentence appears (proving the previous one is stable).
  *
- * Ported from parakeet-ui/src/UtteranceBasedMerger.js to TypeScript,
+ * Ported from legacy UI project/src/UtteranceBasedMerger.js to TypeScript,
  * with additions for VAD-informed timeout finalization and parakeet.js
  * word timestamp format integration.
  *

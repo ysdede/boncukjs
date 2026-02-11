@@ -1,5 +1,5 @@
 /**
- * BoncukJS - Continuous Mel Producer Worker
+ * Keet - Continuous Mel Producer Worker
  * 
  * Runs in a separate Web Worker thread, continuously computing raw log-mel
  * spectrogram frames as audio arrives. When the inference pipeline needs

@@ -1,5 +1,5 @@
 /**
- * BoncukJS Service Worker
+ * Keet Service Worker
  * Story 3.1: Offline-first caching strategy
  * 
  * Strategy:
@@ -8,8 +8,8 @@
  * - API/Dynamic: Network-first with fallback
  */
 
-const CACHE_NAME = 'boncukjs-v1';
-const MODEL_CACHE = 'boncukjs-models-v1';
+const CACHE_NAME = 'keet-v1';
+const MODEL_CACHE = 'keet-models-v1';
 
 // App shell files to pre-cache
 const APP_SHELL = [

@@ -1,5 +1,5 @@
 /**
- * BoncukJS v2.0 - Model Manager
+ * Keet v2.0 - Model Manager
  * 
  * Handles loading, caching, and managing parakeet.js model lifecycle.
  * Supports WebGPU with WASM fallback.
@@ -17,7 +17,7 @@ import type {
 // Default model configuration (Parakeet TDT 0.6B)
 const DEFAULT_MODEL_ID = 'parakeet-tdt-0.6b-v2';
 
-const CACHE_NAME = 'boncukjs-model-cache-v1';
+const CACHE_NAME = 'keet-model-cache-v1';
 
 export class ModelManager {
   private _state: ModelState = 'unloaded';

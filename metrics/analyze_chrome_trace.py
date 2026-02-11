@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive Chrome trace analyzer for boncukjs.
+Comprehensive Chrome trace analyzer for keet.
 
 Analyzes Chrome performance traces for:
 - Main thread long tasks and rendering pipeline
@@ -15,7 +15,7 @@ Analyzes Chrome performance traces for:
 Usage:
     python analyze_chrome_trace.py [trace_file.json]
 
-If no file is given, defaults to trace_boncuk-tracing.json in the same directory.
+If no file is given, defaults to trace-keet-tracing.json in the same directory.
 Outputs a JSON summary to trace_analysis_summary.json and prints a human-readable report.
 """
 import json
@@ -450,7 +450,7 @@ def print_report(summary):
     ids = s["thread_ids"]
 
     print("\n" + "=" * 75)
-    print("BONCUKJS CHROME TRACE ANALYSIS REPORT")
+    print("KEET CHROME TRACE ANALYSIS REPORT")
     print("=" * 75)
 
     print(f"\nTrace duration: {s['trace_duration_s']:.1f}s  |  Events: {s['total_events']}")
@@ -544,7 +544,7 @@ def main():
         trace_path = sys.argv[1]
     else:
         script_dir = Path(__file__).parent
-        trace_path = str(script_dir / "trace_boncuk-tracing.json")
+        trace_path = str(script_dir / "trace-keet-tracing.json")
 
     if not os.path.exists(trace_path):
         print(f"Error: Trace file not found: {trace_path}")
