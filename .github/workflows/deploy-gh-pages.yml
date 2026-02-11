@@ -1,0 +1,59 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'vite.config.js'
+      - '.github/workflows/deploy-gh-pages.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        env:
+          BASE_PATH: '/keet/'
+        run: npm run build
+
+      - name: Prepare deployment files
+        run: |
+          mkdir -p deploy_temp
+          cp -r dist/* deploy_temp/
+          touch deploy_temp/.nojekyll
+          echo "{\"branch\": \"master\", \"commit\": \"$(git rev-parse --short HEAD)\"}" > deploy_temp/git-info.json
+          # Fix paths for GitHub Pages project site subpath /keet/
+          sed -i 's|"/manifest.json"|"/keet/manifest.json"|g' deploy_temp/index.html
+          sed -i 's|"/sw.js"|"/keet/sw.js"|g' deploy_temp/index.html
+          sed -i 's|href="/icons/|href="/keet/icons/|g' deploy_temp/index.html
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./deploy_temp
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: 'Deploy: ${{ github.event.head_commit.message }}'
