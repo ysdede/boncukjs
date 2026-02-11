@@ -543,7 +543,8 @@ const App: Component = () => {
             }
           });
           // TEN-VAD init is non-blocking; falls back gracefully if WASM fails
-          tenVADClient.init({ hopSize: 256, threshold: 0.5 }).catch((err) => {
+          const wasmPath = `${import.meta.env.BASE_URL}wasm/`;
+          tenVADClient.init({ hopSize: 256, threshold: 0.5, wasmPath }).catch((err) => {
             console.warn('[v4] TEN-VAD init failed, using energy-only:', err);
           });
 
