@@ -125,7 +125,7 @@ export class TenVADWorkerClient {
                 this.pendingPromises.delete(msg.id);
                 p.reject(new Error(msg.payload));
             } else {
-                console.error('[TenVADWorkerClient] Unhandled error:', msg.payload);
+                console.warn(`[TenVADWorkerClient] Received ERROR for unknown/resolved request ${msg.id}:`, msg.payload);
             }
             return;
         }
