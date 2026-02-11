@@ -69,7 +69,11 @@ try {
   httpsConfig = false;
 }
 
+// GitHub Pages project site is served at /keet/; set BASE_PATH in CI
+const base = process.env.BASE_PATH || '/';
+
 export default defineConfig({
+  base,
   plugins: [
     tailwindcss(),
     solidPlugin()
