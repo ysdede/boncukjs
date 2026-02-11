@@ -370,27 +370,50 @@ export class AudioSegmentProcessor {
      * Find the actual speech start using lookback and energy trend analysis.
      */
     private findSpeechStart(): number {
+        const firstSpeechIndex = this.findLastSpeechChunkIndex();
+
+        const risingEnergyIndex = this.findRisingEnergyStart(firstSpeechIndex);
+        if (risingEnergyIndex !== null) {
+            return risingEnergyIndex;
+        }
+
+        const snrCrossingIndex = this.findSnrCrossingStart(firstSpeechIndex);
+        if (snrCrossingIndex !== null) {
+            return snrCrossingIndex;
+        }
+
+        // Default lookback
+        return Math.max(0, firstSpeechIndex - 4);
+    }
+
+    /**
+     * Find the index of the most recent chunk marked as speech.
+     */
+    private findLastSpeechChunkIndex(): number {
+        const chunks = this.state.recentChunks;
+        for (let i = chunks.length - 1; i >= 0; i--) {
+            if (chunks[i].isSpeech) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Find the start of a rising energy trend preceding speech.
+     */
+    private findRisingEnergyStart(startIndex: number): number | null {
         const chunks = this.state.recentChunks;
         const minSnrThreshold = this.options.minSnrThreshold;
 
-        // Find the most recent speech chunk
-        let firstSpeechIndex = 0;
-        for (let i = chunks.length - 1; i >= 0; i--) {
-            if (chunks[i].isSpeech) {
-                firstSpeechIndex = i;
-                break;
-            }
-        }
-
-        // Look for the earliest point where energy starts rising towards speech
-        let earliestRisingIndex = firstSpeechIndex;
         let foundRisingTrend = false;
+        let currentBestIndex = startIndex;
 
-        for (let i = firstSpeechIndex - 1; i >= 0; i--) {
+        for (let i = startIndex - 1; i >= 0; i--) {
             // Check for rising energy trend
             if (i < chunks.length - 1 &&
                 chunks[i + 1].energy > chunks[i].energy * (1 + this.options.energyRiseThreshold)) {
-                earliestRisingIndex = i;
+                currentBestIndex = i;
                 foundRisingTrend = true;
             }
 
@@ -400,30 +423,38 @@ export class AudioSegmentProcessor {
             }
 
             // Limit lookback to ~500ms (assuming 80ms chunks)
-            if (firstSpeechIndex - i > 6) {
+            if (startIndex - i > 6) {
                 break;
             }
         }
 
         if (foundRisingTrend) {
             this.log('Found rising energy trend for speech onset', {
-                index: earliestRisingIndex,
-                time: chunks[earliestRisingIndex].time.toFixed(3),
-                energy: chunks[earliestRisingIndex].energy.toFixed(6),
-                snr: chunks[earliestRisingIndex].snr.toFixed(2)
+                index: currentBestIndex,
+                time: chunks[currentBestIndex].time.toFixed(3),
+                energy: chunks[currentBestIndex].energy.toFixed(6),
+                snr: chunks[currentBestIndex].snr.toFixed(2)
             });
-            return earliestRisingIndex;
+            return currentBestIndex;
         }
 
-        // Check for SNR crossing
-        for (let i = firstSpeechIndex; i >= 0; i--) {
+        return null;
+    }
+
+    /**
+     * Find where SNR crosses the minimum threshold.
+     */
+    private findSnrCrossingStart(startIndex: number): number | null {
+        const chunks = this.state.recentChunks;
+        const minSnrThreshold = this.options.minSnrThreshold;
+
+        for (let i = startIndex; i >= 0; i--) {
             if (chunks[i].snr < minSnrThreshold) {
                 return Math.min(chunks.length - 1, i + 1);
             }
         }
 
-        // Default lookback
-        return Math.max(0, firstSpeechIndex - 4);
+        return null;
     }
 
     /**
