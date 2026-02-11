@@ -259,9 +259,14 @@ function handleDispose(id: number): void {
 }
 
 function respond(msg: any, transfers?: Transferable[]): void {
-    if (transfers) {
-        (self as any).postMessage(msg, transfers);
-    } else {
-        (self as any).postMessage(msg);
+    try {
+        if (transfers) {
+            (self as any).postMessage(msg, transfers);
+        } else {
+            (self as any).postMessage(msg);
+        }
+    } catch (err) {
+        // Prevent infinite loops if postMessage fails and triggers global error handler
+        console.error('[TenVAD Worker] Failed to post message:', err);
     }
 }

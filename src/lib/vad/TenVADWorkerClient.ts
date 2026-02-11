@@ -125,7 +125,7 @@ export class TenVADWorkerClient {
                 this.pendingPromises.delete(msg.id);
                 p.reject(new Error(msg.payload));
             } else {
-                console.error('[TenVADWorkerClient] Unhandled error:', msg.payload);
+                console.warn('[TenVADWorkerClient] Unhandled error (possibly duplicate):', msg.payload);
             }
             return;
         }
@@ -142,7 +142,26 @@ export class TenVADWorkerClient {
     private sendRequest(type: string, payload: any): Promise<any> {
         return new Promise((resolve, reject) => {
             const id = ++this.messageId;
-            this.pendingPromises.set(id, { resolve, reject });
+
+            // Set a timeout to prevent hanging indefinitely
+            const timeoutId = setTimeout(() => {
+                if (this.pendingPromises.has(id)) {
+                    this.pendingPromises.delete(id);
+                    reject(new Error(`TenVADWorkerClient request ${type} timed out`));
+                }
+            }, 5000);
+
+            // Wrap resolve/reject to clear timeout
+            const wrappedResolve = (val: any) => {
+                clearTimeout(timeoutId);
+                resolve(val);
+            };
+            const wrappedReject = (err: any) => {
+                clearTimeout(timeoutId);
+                reject(err);
+            };
+
+            this.pendingPromises.set(id, { resolve: wrappedResolve, reject: wrappedReject });
             this.worker.postMessage({ type, payload, id });
         });
     }
