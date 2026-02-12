@@ -21,6 +21,7 @@ const APP_SHELL = [
 
 // Model file patterns (cached on-demand)
 const MODEL_PATTERNS = [
+    /\.onnx\.data$/,
     /\.onnx$/,
     /\.bin$/,
     /vocab\.txt$/,

@@ -18,6 +18,25 @@ import type {
 const DEFAULT_MODEL_ID = 'parakeet-tdt-0.6b-v2';
 
 const CACHE_NAME = 'keet-model-cache-v1';
+const PARAKEET_DB_NAME = 'parakeet-cache-db';
+
+type ModelConfigResolver = ((modelKeyOrRepoId: string) => { repoId?: string } | null) | undefined;
+
+type ResolvedModelAssets = {
+  urls: {
+    encoderUrl: string;
+    decoderUrl: string;
+    tokenizerUrl: string;
+    preprocessorUrl?: string;
+    encoderDataUrl?: string | null;
+    decoderDataUrl?: string | null;
+  };
+  filenames?: {
+    encoder: string;
+    decoder: string;
+  };
+  preprocessorBackend?: string;
+};
 
 export class ModelManager {
   private _state: ModelState = 'unloaded';
@@ -77,7 +96,19 @@ export class ModelManager {
       this._setProgress({ stage: 'import', progress: 15, message: 'Loading parakeet.js...' });
 
       // @ts-ignore - parakeet.js is a JS module
-      const { ParakeetModel, getParakeetModel } = await import('parakeet.js');
+      const { ParakeetModel, getParakeetModel, getModelConfig } = await import('parakeet.js');
+
+      const createModelFromAssets = async (assets: ResolvedModelAssets): Promise<any> => {
+        const preprocessorBackend = assets.preprocessorBackend || 'js';
+        console.log(`[ModelManager] Loading model with backend=${this._backend}, preprocessorBackend=${preprocessorBackend}`);
+        return ParakeetModel.fromUrls({
+          ...assets.urls,
+          filenames: assets.filenames,
+          preprocessorBackend,
+          backend: this._backend === 'webgpu' ? 'webgpu-hybrid' : 'wasm',
+          verbose: false,
+        });
+      };
 
       // 3. Resolve model URLs via parakeet.js Hub (handles .data files correctly)
       this._setProgress({
@@ -108,16 +139,36 @@ export class ModelManager {
         message: 'Compiling model (this may take a moment)...'
       });
 
-      const preprocessorBackend = modelAssets.preprocessorBackend || 'js';
-      console.log(`[ModelManager] Loading model with backend=${this._backend}, preprocessorBackend=${preprocessorBackend}`);
+      try {
+        this._model = await createModelFromAssets(modelAssets as ResolvedModelAssets);
+      } catch (loadError) {
+        if (!this._isRecoverableFetchError(loadError)) {
+          throw loadError;
+        }
 
-      this._model = await ParakeetModel.fromUrls({
-        ...modelAssets.urls,
-        filenames: modelAssets.filenames,
-        preprocessorBackend,
-        backend: this._backend === 'webgpu' ? 'webgpu-hybrid' : 'wasm',
-        verbose: false,
-      });
+        console.warn('[ModelManager] Hub blob URL load failed, clearing stale cache and retrying with direct URLs');
+        this._setProgress({
+          stage: 'recover',
+          progress: 35,
+          message: 'Recovering stale model cache...'
+        });
+
+        await this._clearParakeetIndexedDbCache();
+
+        const directAssets = this._buildDirectModelAssets(
+          modelId,
+          this._backend,
+          getModelConfig as ModelConfigResolver
+        );
+
+        this._setProgress({
+          stage: 'recover',
+          progress: 55,
+          message: 'Retrying model load...'
+        });
+
+        this._model = await createModelFromAssets(directAssets);
+      }
 
       // Log which preprocessor the model is actually using
       const ppBackend = this._model.getPreprocessorBackend?.() || 'unknown';
@@ -278,6 +329,7 @@ export class ModelManager {
   async clearCache(): Promise<void> {
     try {
       await caches.delete(CACHE_NAME);
+      await this._clearParakeetIndexedDbCache();
       this._isCached = false;
       console.log('Model cache cleared');
     } catch (e) {
@@ -292,5 +344,51 @@ export class ModelManager {
     this._model = null;
     this._state = 'unloaded';
     this._progress = 0;
+  }
+
+  private _isRecoverableFetchError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+    const message = error.message.toLowerCase();
+    return message.includes('failed to fetch') || message.includes('fetch failed');
+  }
+
+  private _buildDirectModelAssets(
+    modelId: string,
+    backend: BackendType,
+    getModelConfig: ModelConfigResolver
+  ): ResolvedModelAssets {
+    const repoId = getModelConfig?.(modelId)?.repoId || modelId;
+    const revision = 'main';
+    const encoderName = backend === 'webgpu' ? 'encoder-model.onnx' : 'encoder-model.int8.onnx';
+    const decoderName = 'decoder_joint-model.int8.onnx';
+    const baseUrl = `https://huggingface.co/${repoId}/resolve/${revision}`;
+
+    return {
+      urls: {
+        encoderUrl: `${baseUrl}/${encoderName}`,
+        decoderUrl: `${baseUrl}/${decoderName}`,
+        tokenizerUrl: `${baseUrl}/vocab.txt`,
+      },
+      preprocessorBackend: 'js',
+    };
+  }
+
+  private async _clearParakeetIndexedDbCache(): Promise<void> {
+    if (typeof indexedDB === 'undefined') return;
+
+    await new Promise<void>((resolve) => {
+      const request = indexedDB.deleteDatabase(PARAKEET_DB_NAME);
+      request.onsuccess = () => resolve();
+      request.onerror = () => {
+        console.warn('[ModelManager] Failed to clear parakeet IndexedDB cache');
+        resolve();
+      };
+      request.onblocked = () => {
+        console.warn('[ModelManager] Parakeet IndexedDB cache clear blocked');
+        resolve();
+      };
+    });
   }
 }
