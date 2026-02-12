@@ -28,7 +28,10 @@
   <script>
     if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js')
+        // Derive base path from the manifest link (Vite rewrites it with the correct base)
+        var manifestLink = document.querySelector('link[rel="manifest"]');
+        var base = manifestLink ? manifestLink.href.replace(/manifest\.json$/, '') : (location.pathname.replace(/\/[^\/]*$/, '/'));
+        navigator.serviceWorker.register(base + 'sw.js')
           .then((reg) => console.log('[App] SW registered:', reg.scope))
           .catch((err) => console.warn('[App] SW registration failed:', err));
       });

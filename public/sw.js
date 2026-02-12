@@ -11,11 +11,11 @@
 const CACHE_NAME = 'keet-v1';
 const MODEL_CACHE = 'keet-models-v1';
 
-// App shell files to pre-cache
+// App shell files to pre-cache (relative to SW scope)
 const APP_SHELL = [
-    '/',
-    '/index.html',
-    '/manifest.json',
+    './',
+    './index.html',
+    './manifest.json',
 ];
 
 // Model file patterns (cached on-demand)

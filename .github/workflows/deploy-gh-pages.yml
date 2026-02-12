@@ -43,10 +43,6 @@ jobs:
           cp -r dist/* deploy_temp/
           touch deploy_temp/.nojekyll
           echo "{\"branch\": \"master\", \"commit\": \"$(git rev-parse --short HEAD)\"}" > deploy_temp/git-info.json
-          # Fix paths for GitHub Pages project site subpath /keet/
-          sed -i 's|"/manifest.json"|"/keet/manifest.json"|g' deploy_temp/index.html
-          sed -i 's|"/sw.js"|"/keet/sw.js"|g' deploy_temp/index.html
-          sed -i 's|href="/icons/|href="/keet/icons/|g' deploy_temp/index.html
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
