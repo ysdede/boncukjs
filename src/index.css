@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -7,8 +6,8 @@
   --color-workspace-bg: #f9fafc;
   --color-sidebar-border: #d1d5db;
 
-  --font-display: "Manrope", sans-serif;
-  --font-sans: "Manrope", sans-serif;
+  --font-display: "Manrope Variable", sans-serif;
+  --font-sans: "Manrope Variable", sans-serif;
 
   --shadow-neu-flat: 6px 6px 12px #c8cdd8, -6px -6px 12px #ffffff;
   --shadow-neu-pressed: inset 4px 4px 8px #c8cdd8, inset -4px -4px 8px #ffffff;
@@ -18,7 +17,7 @@
 
 /* Material Symbols - ensure they load and look sharp. */
 .material-symbols-outlined {
-  font-family: 'Material Symbols Outlined' !important;
+  font-family: 'Material Symbols Outlined Variable' !important;
   font-weight: normal;
   font-style: normal;
   font-size: 24px;
@@ -108,7 +107,7 @@ body {
 code,
 pre,
 .font-mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono Variable', monospace;
 }
 
 /* Waveform animation */
