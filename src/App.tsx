@@ -402,7 +402,7 @@ const App: Component = () => {
           modelConfidence: 0,
         });
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('[v4Tick] Inference error:', err);
     } finally {
       v4InferenceBusy = false;
@@ -738,8 +738,9 @@ const App: Component = () => {
             }
           }
         }, 100);
-      } catch (err: any) {
-        appStore.setErrorMessage(err.message);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        appStore.setErrorMessage(message);
       }
     }
   };
