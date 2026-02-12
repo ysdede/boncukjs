@@ -66,4 +66,63 @@ describe('AudioSegmentProcessor', () => {
         expect(state.inSpeech).toBe(false);
         expect(state.speechStartTime).toBeNull();
     });
+
+    it('should proactively split segments exceeding maxDuration', () => {
+        // Configure processor with a short max segment duration
+        const sampleRate = 16000;
+        const maxDuration = 0.5; // 500ms
+
+        const processor = new AudioSegmentProcessor({
+            sampleRate,
+            maxSegmentDuration: maxDuration,
+            energyThreshold: 0.01, // Low threshold to ensure speech detection
+            minSpeechDuration: 0.1,
+            // Disable complex logic that might interfere with simple test
+            snrThreshold: 0,
+            minSnrThreshold: 0
+        });
+
+        const chunkSize = Math.round(sampleRate * 0.1); // 100ms chunks
+        const highEnergyChunk = new Float32Array(chunkSize).fill(0.5);
+        const highEnergy = 0.5;
+
+        // Process chunks
+        let currentTime = 0;
+        let emittedSegments: any[] = [];
+        let speechStarted = false;
+
+        // Feed chunks for 0.8 seconds (8 chunks)
+        // We expect a split around 0.5 - 0.6 seconds
+        for (let i = 0; i < 8; i++) {
+            currentTime += 0.1;
+
+            const segments = processor.processAudioData(highEnergyChunk, currentTime, highEnergy);
+
+            if (segments.length > 0) {
+                emittedSegments.push(...segments);
+            }
+
+            const state = processor.getStateInfo();
+            if (state.inSpeech) {
+                speechStarted = true;
+            }
+        }
+
+        // Verify speech started
+        expect(speechStarted).toBe(true);
+
+        // Verify we got at least one segment due to splitting
+        expect(emittedSegments.length).toBeGreaterThan(0);
+
+        const firstSegment = emittedSegments[0];
+
+        // The first segment should be around maxDuration
+        expect(firstSegment.duration).toBeGreaterThanOrEqual(maxDuration);
+        expect(firstSegment.duration).toBeLessThan(maxDuration + 0.2);
+
+        // Verify the processor is still in speech state
+        const finalState = processor.getStateInfo();
+        expect(finalState.inSpeech).toBe(true);
+        expect(finalState.speechStartTime).toBeGreaterThanOrEqual(firstSegment.endTime);
+    });
 });
