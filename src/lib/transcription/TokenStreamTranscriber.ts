@@ -259,12 +259,37 @@ export class TokenStreamTranscriber {
             } : undefined,
         });
 
+        // Determine merger overlap
+        const mergerOverlap = this._chunkCount > 0 ? (startTime !== undefined ? actualOverlap : this._config.overlapDuration) : 0;
+
+        const { tokenStreamResult, mergeResult } = this._handleProcessingResult(result, chunkStartTime, mergerOverlap);
+
+        // Always log preprocessing info from model metrics
+        const m = result.metrics;
+        if (m) {
+            console.log(`[TokenStreamTranscriber] Chunk #${this._chunkCount + 1}: preprocessor=${m.preprocessor_backend || 'unknown'}, preprocess=${m.preprocess_ms}ms, encode=${m.encode_ms}ms, decode=${m.decode_ms}ms, total=${m.total_ms}ms${m.mel_cache ? `, mel_cache: ${m.mel_cache.cached_frames} cached / ${m.mel_cache.new_frames} new` : ''}`);
+        }
+
+        if (this._config.debug) {
+            console.log(`[TokenStreamTranscriber] Chunk ${this._chunkCount}: start=${chunkStartTime.toFixed(2)}s, overlap=${actualOverlap.toFixed(2)}s, LCS=${mergeResult.lcsLength}, anchor=${mergeResult.anchorValid}`);
+        }
+
+        return tokenStreamResult;
+    }
+
+    /**
+     * Shared logic for processing transcription results.
+     */
+    private _handleProcessingResult(
+        result: any,
+        chunkStartTime: number,
+        mergerOverlap: number
+    ): { tokenStreamResult: TokenStreamResult; mergeResult: any } {
         // Merge using LCSPTFAMerger
-        // We use the provided overlap or calculated one
         const mergeResult = this._merger!.processChunk(
             result,
             chunkStartTime,
-            this._chunkCount > 0 ? (startTime !== undefined ? actualOverlap : this._config.overlapDuration) : 0
+            mergerOverlap
         );
 
         // Update state for next chunk
@@ -286,24 +311,17 @@ export class TokenStreamTranscriber {
             anchorTokens: mergeResult.anchorTokens
         });
 
-        // Always log preprocessing info from model metrics
-        const m = result.metrics;
-        if (m) {
-            console.log(`[TokenStreamTranscriber] Chunk #${this._chunkCount + 1}: preprocessor=${m.preprocessor_backend || 'unknown'}, preprocess=${m.preprocess_ms}ms, encode=${m.encode_ms}ms, decode=${m.decode_ms}ms, total=${m.total_ms}ms${m.mel_cache ? `, mel_cache: ${m.mel_cache.cached_frames} cached / ${m.mel_cache.new_frames} new` : ''}`);
-        }
-
-        if (this._config.debug) {
-            console.log(`[TokenStreamTranscriber] Chunk ${this._chunkCount}: start=${chunkStartTime.toFixed(2)}s, overlap=${actualOverlap.toFixed(2)}s, LCS=${mergeResult.lcsLength}, anchor=${mergeResult.anchorValid}`);
-        }
-
         return {
-            confirmedText,
-            pendingText,
-            fullText,
-            lcsLength: mergeResult.lcsLength,
-            anchorValid: mergeResult.anchorValid,
-            chunkCount: this._chunkCount,
-            anchorTokens: mergeResult.anchorTokens,
+            tokenStreamResult: {
+                confirmedText,
+                pendingText,
+                fullText,
+                lcsLength: mergeResult.lcsLength,
+                anchorValid: mergeResult.anchorValid,
+                chunkCount: this._chunkCount,
+                anchorTokens: mergeResult.anchorTokens,
+            },
+            mergeResult
         };
     }
 
@@ -391,31 +409,10 @@ export class TokenStreamTranscriber {
             } : undefined,
         });
 
-        // Merge using LCSPTFAMerger (same as audio path)
-        const mergeResult = this._merger!.processChunk(
-            result,
-            chunkStartTime,
-            this._chunkCount > 0 ? actualOverlap : 0
-        );
+        // Determine merger overlap
+        const mergerOverlap = this._chunkCount > 0 ? actualOverlap : 0;
 
-        // Update state for next chunk
-        this._currentTimestamp = chunkStartTime;
-        this._chunkCount++;
-
-        // Get formatted text
-        const texts = this._merger!.getText(this._tokenizer);
-        const confirmedText = texts.confirmed;
-        const pendingText = texts.pending;
-        const fullText = texts.full;
-
-        // Notify callbacks
-        this._callbacks.onConfirmedUpdate?.(confirmedText, mergeResult.confirmed);
-        this._callbacks.onPendingUpdate?.(pendingText, mergeResult.pending);
-        this._callbacks.onMergeInfo?.({
-            lcsLength: mergeResult.lcsLength,
-            anchorValid: mergeResult.anchorValid,
-            anchorTokens: mergeResult.anchorTokens
-        });
+        const { tokenStreamResult, mergeResult } = this._handleProcessingResult(result, chunkStartTime, mergerOverlap);
 
         // Always log preprocessing info from model metrics
         const m = result.metrics;
@@ -427,15 +424,7 @@ export class TokenStreamTranscriber {
             console.log(`[TokenStreamTranscriber] Features chunk ${this._chunkCount}: start=${chunkStartTime.toFixed(2)}s, overlap=${actualOverlap.toFixed(2)}s, T=${T}, LCS=${mergeResult.lcsLength}`);
         }
 
-        return {
-            confirmedText,
-            pendingText,
-            fullText,
-            lcsLength: mergeResult.lcsLength,
-            anchorValid: mergeResult.anchorValid,
-            chunkCount: this._chunkCount,
-            anchorTokens: mergeResult.anchorTokens,
-        };
+        return tokenStreamResult;
     }
 
     /**
