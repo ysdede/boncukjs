@@ -1,9 +1,10 @@
 import { Component, Show, For, createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import { appStore } from './stores/appStore';
-import { CompactWaveform, ModelLoadingOverlay, DebugPanel, TranscriptionDisplay, SettingsContent } from './components';
+import { CompactWaveform, SPECTRUM_BAR_COUNT, ModelLoadingOverlay, DebugPanel, TranscriptionDisplay, SettingsContent } from './components';
 import { getModelDisplayName, MODELS } from './components/ModelLoadingOverlay';
 import { AudioEngine } from './lib/audio';
 import { MelWorkerClient } from './lib/audio/MelWorkerClient';
+import { normalizeMelForDisplay } from './lib/audio/mel-display';
 import { TranscriptionWorkerClient } from './lib/transcription';
 import { HybridVAD } from './lib/vad';
 import { WindowBuilder } from './lib/transcription/WindowBuilder';
@@ -23,7 +24,7 @@ export const [melClientSignal, setMelClientSignal] = createSignal<MelWorkerClien
 let segmentUnsubscribe: (() => void) | null = null;
 let windowUnsubscribe: (() => void) | null = null;
 let melChunkUnsubscribe: (() => void) | null = null;
-let energyPollInterval: number | undefined;
+let visualizationUnsubscribe: (() => void) | undefined;
 // v4 pipeline instances
 let hybridVAD: HybridVAD | null = null;
 let bufferClient: BufferWorkerClient | null = null;
@@ -250,7 +251,7 @@ const App: Component = () => {
   });
 
   onCleanup(() => {
-    if (energyPollInterval) clearInterval(energyPollInterval);
+    visualizationUnsubscribe?.();
     cleanupV4Pipeline();
     melClient?.dispose();
     workerClient?.dispose();
@@ -489,12 +490,11 @@ const App: Component = () => {
   const toggleRecording = async () => {
     if (isRecording()) {
       // Update UI immediately so the stop button always takes effect even if cleanup throws
-      if (energyPollInterval) {
-        clearInterval(energyPollInterval);
-        energyPollInterval = undefined;
-      }
+      visualizationUnsubscribe?.();
+      visualizationUnsubscribe = undefined;
       appStore.stopRecording();
       appStore.setAudioLevel(0);
+      appStore.setBarLevels(new Float32Array(0));
 
       try {
         audioEngine?.stop();
@@ -777,15 +777,28 @@ const App: Component = () => {
 
         appStore.startRecording();
 
-        energyPollInterval = window.setInterval(() => {
-          if (audioEngine) {
-            appStore.setAudioLevel(audioEngine.getCurrentEnergy());
-            // Only set speech detected here for non-v4 modes (v4 handles it in VAD callback)
-            if (appStore.transcriptionMode() !== 'v4-utterance') {
-              appStore.setIsSpeechDetected(audioEngine.isSpeechActive());
-            }
+        // Use same 30fps tick as mel spectrogram (onVisualizationUpdate is throttled to 33ms)
+        visualizationUnsubscribe = audioEngine.onVisualizationUpdate((_data, metrics) => {
+          appStore.setAudioLevel(metrics.currentEnergy);
+          if (appStore.transcriptionMode() !== 'v4-utterance') {
+            appStore.setIsSpeechDetected(audioEngine?.isSpeechActive() ?? false);
           }
-        }, 100);
+          if (melClient) {
+            melClient.getLastMelFrame().then((frame) => {
+              if (frame && frame.length >= SPECTRUM_BAR_COUNT) {
+                const out = new Float32Array(SPECTRUM_BAR_COUNT);
+                for (let m = 0; m < SPECTRUM_BAR_COUNT; m++) {
+                  out[m] = normalizeMelForDisplay(frame[m]);
+                }
+                appStore.setBarLevels(out);
+              } else if (audioEngine) {
+                appStore.setBarLevels(audioEngine.getBarLevels());
+              }
+            });
+          } else if (audioEngine) {
+            appStore.setBarLevels(audioEngine.getBarLevels());
+          }
+        });
       } catch (err: any) {
         appStore.setErrorMessage(err.message);
       }
@@ -902,7 +915,7 @@ const App: Component = () => {
             </div>
             <div class="flex-1 min-w-0 flex flex-col justify-center gap-1">
               <div class="h-8 flex items-center justify-center gap-1 overflow-hidden opacity-80 abstract-wave">
-                <CompactWaveform audioLevel={appStore.audioLevel()} isRecording={isRecording()} />
+                <CompactWaveform audioLevel={appStore.audioLevel()} barLevels={appStore.barLevels()} isRecording={isRecording()} />
               </div>
               <Show when={appStore.modelState() === 'loading'}>
                 <div class="flex items-center gap-2 px-1">

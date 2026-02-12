@@ -1,6 +1,7 @@
 import { Component, onMount, onCleanup, createSignal } from 'solid-js';
 import type { AudioEngine } from '../lib/audio/types';
 import type { MelWorkerClient } from '../lib/audio/MelWorkerClient';
+import { normalizeMelForDisplay } from '../lib/audio/mel-display';
 import { appStore } from '../stores/appStore';
 
 interface LayeredBufferVisualizerProps {
@@ -12,21 +13,7 @@ interface LayeredBufferVisualizerProps {
 
 const MEL_BINS = 128; // Standard for this app
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Fixed dB scaling for spectrogram visualization (2026-02-09)
-// ═══════════════════════════════════════════════════════════════════════════
-// Raw log-mel features (unnormalized) have typical range:
-//   - Silence: ~-11 to -8 (log of the zero guard + quiet noise)
-//   - Speech:  ~-4 to 0 (energetic speech peaks near 0)
-//
-// Using fixed scaling avoids "gain hunting" where per-window normalization
-// causes silence to stretch to full brightness (GitHub issue #89).
-//
-// To tune: set MAX_DB higher if clipping occurs on loud speech;
-// set MIN_DB lower if you want more contrast in quiet passages.
-const MIN_DB = -11.0; // Black: noise floor / silence
-const MAX_DB = 0.0;   // Red: loudest speech peaks
-const DB_RANGE = MAX_DB - MIN_DB; // 11.0
+// dB scaling is in mel-display.ts (shared with bar visualizer)
 
 // Pre-computed 256-entry RGB lookup table for mel heatmap (black to red).
 // Built once at module load; indexed by Math.round(intensity * 255).
@@ -333,12 +320,7 @@ export const LayeredBufferVisualizer: Component<LayeredBufferVisualizerProps> = 
                 if (m >= melBins) continue;
 
                 const val = features[m * timeSteps + t];
-
-                // Fixed dB scaling: map MIN_DB..MAX_DB to 0..1, then to LUT index.
-                // Raw log-mel values are in range ~-11 (silence) to ~0 (loud speech).
-                // This avoids "gain hunting" where silence is stretched to full brightness.
-                const normalized = (val - MIN_DB) / DB_RANGE;
-                const clamped = Math.max(0, Math.min(1, normalized));
+                const clamped = normalizeMelForDisplay(val);
                 const lutIdx = (clamped * 255) | 0;
                 const lutBase = lutIdx * 3;
 

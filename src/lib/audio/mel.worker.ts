@@ -287,6 +287,26 @@ function getFeatures(startFrame: number, endFrame: number, normalize: boolean = 
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Last mel frame (for equalizer-style bar display)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Return the last computed mel frame (raw log-mel, one value per bin).
+ * Averages the last 2 frames for smoother display. Returns null if no frames.
+ */
+function getLastMelFrame(): Float32Array | null {
+    if (!rawMelBuffer || computedFrames === 0) return null;
+    const out = new Float32Array(nMels);
+    const lastIdx = (computedFrames - 1 + maxFrames) % maxFrames;
+    const prevIdx = computedFrames >= 2 ? (computedFrames - 2 + maxFrames) % maxFrames : lastIdx;
+    for (let m = 0; m < nMels; m++) {
+        const base = m * maxFrames;
+        out[m] = 0.5 * (rawMelBuffer[base + lastIdx] + rawMelBuffer[base + prevIdx]);
+    }
+    return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Reset
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -354,6 +374,19 @@ self.onmessage = (e: MessageEvent) => {
                     },
                     id,
                 });
+                break;
+            }
+
+            case 'GET_LAST_MEL_FRAME': {
+                const frame = getLastMelFrame();
+                if (frame) {
+                    postMessage(
+                        { type: 'GET_LAST_MEL_FRAME_DONE', payload: { melFrame: frame }, id },
+                        [frame.buffer] as any
+                    );
+                } else {
+                    postMessage({ type: 'GET_LAST_MEL_FRAME_DONE', payload: null, id });
+                }
                 break;
             }
 

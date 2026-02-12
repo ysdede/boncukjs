@@ -90,6 +90,9 @@ export interface AudioEngine {
     /** Get current audio energy level (for visualization) */
     getCurrentEnergy(): number;
 
+    /** Last N energy values for bar visualizer (0..1), oldest first. */
+    getBarLevels(): Float32Array;
+
     /** Get current signal metrics (noise floor, SNR, thresholds) */
     getSignalMetrics(): { noiseFloor: number; snr: number; threshold: number; snrThreshold: number };
 

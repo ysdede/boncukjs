@@ -2,9 +2,24 @@ import { Component, onCleanup, onMount } from 'solid-js';
 
 interface WaveformProps {
   audioLevel: number;
+  /** Per-bar levels in 0..1: mel spectrum or last N energy. When provided, bars use this. */
+  barLevels?: Float32Array;
   isRecording: boolean;
   barCount?: number;
 }
+
+/** Fading gray by intensity: light gray (low energy) to dark gray (high energy). */
+function grayForIntensity(intensity: number): string {
+  const t = Math.max(0, Math.min(1, intensity));
+  const g = Math.round(220 - t * 150);
+  return `rgb(${g},${g},${g})`;
+}
+
+/** Gamma for bar height so hot bins do not dominate; matches spectrogram perception. */
+const BAR_HEIGHT_GAMMA = 0.65;
+
+/** Blend factor for smooth transition to new mel data (0=no change, 1=instant). */
+const MEL_SMOOTH_ALPHA = 0.35;
 
 /**
  * Canvas-based waveform visualizer.
@@ -28,9 +43,9 @@ export const Waveform: Component<WaveformProps> = (props) => {
   // Persistent bar heights array (mutated in-place, no allocations per frame)
   let bars: Float32Array = new Float32Array(0);
 
-  // Throttle to ~30fps (33ms) - plenty smooth for a decorative visualizer
+  // Draw every frame for smooth mel transitions; no throttle
   let lastDrawTime = 0;
-  const DRAW_INTERVAL_MS = 33;
+  const DRAW_INTERVAL_MS = 0;
 
   // Cache CSS color; refresh occasionally to avoid per-frame style recalcs
   let primaryColor = '#14b8a6';
@@ -69,20 +84,27 @@ export const Waveform: Component<WaveformProps> = (props) => {
     // Lazily init or resize the bars array
     if (bars.length !== n) {
       bars = new Float32Array(n);
-      bars.fill(0.1);
+      bars.fill(0);
     }
 
-    // Update bar heights in-place: use true amplitude (level in 0..1 from getCurrentEnergy).
-    // No display amplification so bars reflect actual level; ASR pipeline unchanged.
-    if (props.isRecording) {
+    const levels = props.barLevels;
+    const useRealLevels = levels && levels.length > 0;
+
+    if (props.isRecording && useRealLevels) {
+      const tail = levels.length >= n ? levels.subarray(levels.length - n) : levels;
+      const offset = n - tail.length;
+      for (let i = 0; i < n; i++) {
+        const newVal = i < offset ? 0 : Math.min(1, Math.max(0, tail[i - offset]));
+        bars[i] = bars[i] * (1 - MEL_SMOOTH_ALPHA) + newVal * MEL_SMOOTH_ALPHA;
+      }
+    } else if (props.isRecording) {
       const level = props.audioLevel;
       for (let i = 0; i < n; i++) {
-        const base = Math.min(1, level + Math.random() * 0.05);
-        bars[i] = Math.max(0.05, base);
+        bars[i] = Math.min(1, Math.max(0, level));
       }
     } else {
       for (let i = 0; i < n; i++) {
-        bars[i] = Math.max(0.05, bars[i] * 0.9);
+        bars[i] = Math.max(0, bars[i] * 0.9);
       }
     }
 
@@ -91,33 +113,40 @@ export const Waveform: Component<WaveformProps> = (props) => {
     const h = canvasRef.height;
     if (w === 0 || h === 0) return;
 
-    ctx.clearRect(0, 0, w, h);
+    const bg = getComputedStyle(canvasRef).getPropertyValue('--color-earthy-bg').trim() || '#faf8f5';
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
 
-    const gap = 2;
-    const barWidth = Math.max(1, (w - gap * (n - 1)) / n);
+    const barWidth = w / n;
     const recording = props.isRecording;
-    const alphaBase = recording ? 0.4 : 0.1;
-    const alphaRange = recording ? 0.4 : 0;
+    const useGray = levels && levels.length > 0;
+    const alphaBase = recording ? 0.5 : 0.15;
+    const alphaRange = recording ? 0.45 : 0.1;
+
+    const ys: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const v = useGray ? Math.pow(bars[i], BAR_HEIGHT_GAMMA) : bars[i];
+      const barH = Math.max(1, v * h);
+      ys.push(h - barH);
+    }
 
     for (let i = 0; i < n; i++) {
-      const barH = Math.max(2, bars[i] * h);
-      const x = i * (barWidth + gap);
-      const y = h - barH;
-      const alpha = alphaBase + bars[i] * alphaRange;
+      const x0 = i * barWidth;
+      const x1 = (i + 1) * barWidth;
+      const y0 = ys[i];
+      const y1 = i + 1 < n ? ys[i + 1] : y0;
+      const midX = (x0 + x1) * 0.5;
+      const midY = (y0 + y1) * 0.5;
 
-      ctx.globalAlpha = alpha * 0.8; // match the container's opacity-80
-      ctx.fillStyle = primaryColor;
+      ctx.globalAlpha = Math.min(1, (alphaBase + bars[i] * alphaRange) * 0.9);
+      ctx.fillStyle = useGray ? grayForIntensity(bars[i]) : primaryColor;
 
-      // Rounded rect (top corners only for bar effect)
-      const radius = Math.min(barWidth / 2, 3);
       ctx.beginPath();
-      ctx.moveTo(x + radius, y);
-      ctx.lineTo(x + barWidth - radius, y);
-      ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
-      ctx.lineTo(x + barWidth, y + barH);
-      ctx.lineTo(x, y + barH);
-      ctx.lineTo(x, y + radius);
-      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.moveTo(x0, h);
+      ctx.lineTo(x0, y0);
+      ctx.quadraticCurveTo(midX, midY, x1, y1);
+      ctx.lineTo(x1, h);
+      ctx.closePath();
       ctx.fill();
     }
 
@@ -154,8 +183,11 @@ export const Waveform: Component<WaveformProps> = (props) => {
   );
 };
 
+/** Bar count: 1:1 with mel bins (128). */
+export const SPECTRUM_BAR_COUNT = 128;
+
 export const CompactWaveform: Component<WaveformProps> = (props) => {
-  return <Waveform {...props} barCount={20} />;
+  return <Waveform {...props} barCount={props.barCount ?? SPECTRUM_BAR_COUNT} />;
 };
 
 export default Waveform;

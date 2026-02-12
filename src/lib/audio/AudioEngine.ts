@@ -44,6 +44,10 @@ export class AudioEngine implements IAudioEngine {
     // SMA buffer for energy calculation
     private energyHistory: number[] = [];
 
+    // Last N energy values for bar visualizer (oldest first when read)
+    private energyBarHistory: number[] = [];
+    private readonly BAR_LEVELS_SIZE = 32;
+
     // Visualization Summary Buffer (Low-Res Min/Max pairs)
     private visualizationSummary: Float32Array | null = null;
     private visualizationSummaryPosition: number = 0;
@@ -349,6 +353,7 @@ export class AudioEngine implements IAudioEngine {
 
         // Clear segment history used by the visualizer
         this.recentSegments = [];
+        this.energyBarHistory = [];
 
         // Reset visualization buffer
         if (this.visualizationBuffer) {
@@ -367,6 +372,18 @@ export class AudioEngine implements IAudioEngine {
 
     getCurrentEnergy(): number {
         return this.currentEnergy;
+    }
+
+    /** Last N energy (RMS) values for bar visualizer; oldest first, 0..1. */
+    getBarLevels(): Float32Array {
+        const h = this.energyBarHistory;
+        const out = new Float32Array(this.BAR_LEVELS_SIZE);
+        const start = h.length <= this.BAR_LEVELS_SIZE ? 0 : h.length - this.BAR_LEVELS_SIZE;
+        for (let i = 0; i < this.BAR_LEVELS_SIZE; i++) {
+            const idx = start + i;
+            out[i] = idx < h.length ? Math.min(1, Math.max(0, h[idx])) : 0;
+        }
+        return out;
     }
 
     getSignalMetrics(): { noiseFloor: number; snr: number; threshold: number; snrThreshold: number } {
@@ -496,6 +513,10 @@ export class AudioEngine implements IAudioEngine {
         const energy = this.energyHistory.reduce((a: number, b: number) => a + b, 0) / this.energyHistory.length;
 
         this.currentEnergy = energy;
+        this.energyBarHistory.push(energy);
+        if (this.energyBarHistory.length > this.BAR_LEVELS_SIZE) {
+            this.energyBarHistory.shift();
+        }
 
         // Log when energy crosses threshold if state is close to changing
         const isSpeech = energy > this.config.energyThreshold;

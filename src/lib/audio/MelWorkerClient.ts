@@ -105,6 +105,15 @@ export class MelWorkerClient {
     }
 
     /**
+     * Get the last mel frame (raw log-mel, 128 bins) for equalizer-style display.
+     * Averages last 2 frames for smoother bars. Returns null if no frames yet.
+     */
+    async getLastMelFrame(): Promise<Float32Array | null> {
+        const p = await this.sendRequest('GET_LAST_MEL_FRAME', {});
+        return (p && p.melFrame) ? p.melFrame : null;
+    }
+
+    /**
      * Get worker status (total samples, computed frames, etc.)
      */
     async getStatus(): Promise<{
