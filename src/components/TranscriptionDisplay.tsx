@@ -1,4 +1,4 @@
-import { Component, Show, createMemo, onMount, onCleanup } from 'solid-js';
+import { Component, Show, createMemo, createEffect } from 'solid-js';
 
 export interface TranscriptionDisplayProps {
     confirmedText: string;
@@ -30,17 +30,15 @@ export const TranscriptionDisplay: Component<TranscriptionDisplayProps> = (props
         (props.confirmedText?.length ?? 0) > 0 || (props.pendingText?.length ?? 0) > 0
     );
 
-    let observer: MutationObserver | undefined;
+    // Auto-scroll when text changes
+    createEffect(() => {
+        // Track text changes
+        props.confirmedText;
+        props.pendingText;
+        // Track recording state (e.g. "Live" indicator appearing)
+        props.isRecording;
 
-    onMount(() => {
-        if (containerRef) {
-            observer = new MutationObserver(scrollToBottom);
-            observer.observe(containerRef, { childList: true, subtree: true });
-        }
-    });
-
-    onCleanup(() => {
-        observer?.disconnect();
+        scrollToBottom();
     });
 
     return (

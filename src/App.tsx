@@ -560,9 +560,11 @@ const App: Component = () => {
             // 2. Forward audio to mel worker (copy, keep chunk for TEN-VAD transfer)
             melClient?.pushAudioCopy(chunk);
 
-            // 3. Forward audio to TEN-VAD worker for inference-based VAD (transfer, no copy)
+            // 3. Forward audio to TEN-VAD worker for inference-based VAD (copy, do NOT transfer)
+            // We use .process() instead of .processTransfer() because AudioEngine still owns 'chunk'
+            // and needs it for ring buffer writing + visualization immediately after this callback.
             if (tenVADClient?.isReady()) {
-              tenVADClient.processTransfer(chunk, chunkOffset);
+              tenVADClient.process(chunk, chunkOffset);
             }
 
             // 4. Update VAD state for UI
