@@ -53,7 +53,7 @@ export interface SentenceBoundaryDetectorConfig {
     cacheSize: number;
     /** Minimum characters for a valid sentence (default: 3) */
     minSentenceLength: number;
-    /** Number of previous sentences to include as context for incremental NLP (default: 8) */
+    /** Number of sentences to include as context for incremental NLP (default: 5, was word-based before) */
     nlpContextSentences: number;
     /** Max sentence endings retained in memory (default: 20) */
     maxRetainedSentences: number;
@@ -73,7 +73,7 @@ export class SentenceBoundaryDetector {
             debug: false,
             cacheSize: 100,
             minSentenceLength: 3,
-            nlpContextSentences: 8,
+            nlpContextSentences: 5, // Changed from 8 - now represents sentence count, not word count
             maxRetainedSentences: 20,
             ...config,
         };
@@ -148,17 +148,45 @@ export class SentenceBoundaryDetector {
 
         if (canIncrement) {
             // --- Incremental path ---
+            // Always use sentence timestamps to determine context - more efficient than fixed word count
             const numPrevSentences = this.lastSentenceEndings.length;
             const contextSentenceCount = this.config.nlpContextSentences;
             let contextIndex: number;
 
-            if (numPrevSentences > contextSentenceCount) {
-                const firstReprocessSentenceIdx = numPrevSentences - contextSentenceCount;
-                const lastHistoricSentence = this.lastSentenceEndings[firstReprocessSentenceIdx - 1];
-                contextIndex = lastHistoricSentence.wordIndex + 1;
+            if (numPrevSentences > 0) {
+                // Use sentence timestamps: get the start of the Nth sentence from the end
+                const sentencesToInclude = Math.min(numPrevSentences, contextSentenceCount);
+                const firstReprocessSentenceIdx = numPrevSentences - sentencesToInclude;
+                
+                if (firstReprocessSentenceIdx > 0) {
+                    // We have enough previous sentences - use the oldest sentence in our context window
+                    const oldestContextSentence = this.lastSentenceEndings[firstReprocessSentenceIdx - 1];
+                    contextIndex = oldestContextSentence.wordIndex + 1;
+                    
+                    if (this.config.debug) {
+                        console.log(
+                            `[SentenceDetector] Incremental: Using ${sentencesToInclude} sentences context, starting from word ${contextIndex}`
+                        );
+                    }
+                } else {
+                    // Not enough sentences - process from the beginning (this is essentially a full reprocess)
+                    contextIndex = 0;
+                    
+                    if (this.config.debug) {
+                        console.log(
+                            `[SentenceDetector] Incremental: Few sentences (${numPrevSentences}), reprocessing all`
+                        );
+                    }
+                }
             } else {
-                const CONTEXT_WORDS = 15;
-                contextIndex = Math.max(0, this.lastProcessedWordCount - CONTEXT_WORDS);
+                // No previous sentences - process all words (first run or reset case)
+                contextIndex = 0;
+                
+                if (this.config.debug) {
+                    console.log(
+                        `[SentenceDetector] Incremental: No previous sentences, processing all ${words.length} words`
+                    );
+                }
             }
 
             const wordsToProcess = words.slice(contextIndex);
@@ -166,12 +194,6 @@ export class SentenceBoundaryDetector {
 
             // Retain endings safely before the reprocessing window
             const retainedEndings = this.lastSentenceEndings.filter(e => e.end < contextStartTime);
-
-            if (this.config.debug) {
-                console.log(
-                    `[SentenceDetector] Incremental: Reprocessing from word ${contextIndex} (${wordsToProcess.length} words). Retaining ${retainedEndings.length} endings.`
-                );
-            }
 
             const newEndingWordsResult = this.performNLP(wordsToProcess);
 
