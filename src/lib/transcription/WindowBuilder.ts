@@ -44,6 +44,8 @@ export interface WindowBuilderConfig {
     useVadBoundaries: boolean;
     /** VAD silence threshold (default: 0.3) */
     vadSilenceThreshold: number;
+    /** Safety pre-roll before mature cursor to avoid clipping first phoneme/word (default: 0.12s) */
+    cursorPrerollSec: number;
     /** Enable debug logging (default: false) */
     debug: boolean;
 }
@@ -74,6 +76,7 @@ export class WindowBuilder {
             maxSentences: 4,
             useVadBoundaries: true,
             vadSilenceThreshold: 0.3,
+            cursorPrerollSec: 0.12,
             debug: false,
             ...config,
         };
@@ -150,6 +153,7 @@ export class WindowBuilder {
 
     /**
      * Build a transcription window from the mature cursor to the current buffer head.
+     * Optionally accepts `startHintFrame` to enforce a lower bound for the window start.
      *
      * Returns null if:
      * - No data in the buffer
@@ -159,15 +163,16 @@ export class WindowBuilder {
      * The caller should use the returned startFrame/endFrame to extract audio
      * from the ring buffer and request mel features from the mel worker.
      */
-    buildWindow(): TranscriptionWindow | null {
+    buildWindow(startHintFrame?: number): TranscriptionWindow | null {
         const endFrame = this.ringBuffer.getCurrentFrame();
         const baseFrame = this.ringBuffer.getBaseFrameOffset();
+        const hintFrame = typeof startHintFrame === 'number' ? Math.max(baseFrame, startHintFrame) : baseFrame;
 
         if (endFrame === baseFrame) {
             return null; // no data
         }
 
-        const availableFrames = endFrame - baseFrame;
+        const availableFrames = endFrame - hintFrame;
 
         // ---- Initial mode (before first sentence) ----
         if (!this.firstSentenceReceived) {
@@ -187,17 +192,18 @@ export class WindowBuilder {
 
             // Start from base, up to max duration
             const maxFrames = Math.round(this.config.maxDurationSec * this.config.sampleRate);
-            const clippedEnd = Math.min(endFrame, baseFrame + maxFrames);
-            const duration = (clippedEnd - baseFrame) / this.config.sampleRate;
+            const initialStart = Math.max(baseFrame, hintFrame);
+            const clippedEnd = Math.min(endFrame, initialStart + maxFrames);
+            const duration = (clippedEnd - initialStart) / this.config.sampleRate;
 
             if (this.config.debug) {
                 console.log(
-                    `[WindowBuilder] Initial window [${baseFrame}:${clippedEnd}] (${duration.toFixed(2)}s)`
+                    `[WindowBuilder] Initial window [${initialStart}:${clippedEnd}] (${duration.toFixed(2)}s)`
                 );
             }
 
             return {
-                startFrame: baseFrame,
+                startFrame: initialStart,
                 endFrame: clippedEnd,
                 durationSeconds: duration,
                 isInitial: true,
@@ -209,7 +215,8 @@ export class WindowBuilder {
         // Determine start frame from mature cursor or sentence ends
         let startFrame: number;
         if (this.matureCursorFrame > 0) {
-            startFrame = this.matureCursorFrame;
+            const prerollFrames = Math.max(0, Math.round(this.config.cursorPrerollSec * this.config.sampleRate));
+            startFrame = Math.max(baseFrame, this.matureCursorFrame - prerollFrames);
         } else if (this.sentenceEnds.length >= 2) {
             startFrame = this.sentenceEnds[this.sentenceEnds.length - 2];
         } else if (this.sentenceEnds.length >= 1) {
@@ -219,13 +226,13 @@ export class WindowBuilder {
         }
 
         // Ensure start frame is within valid buffer range
-        if (startFrame < baseFrame) {
+        if (startFrame < hintFrame) {
             if (this.config.debug) {
                 console.log(
-                    `[WindowBuilder] Start frame ${startFrame} < base ${baseFrame}; clipping to base.`
+                    `[WindowBuilder] Start frame ${startFrame} < hint ${hintFrame}; clipping.`
                 );
             }
-            startFrame = baseFrame;
+            startFrame = hintFrame;
         }
 
         if (startFrame >= endFrame) {
@@ -253,8 +260,13 @@ export class WindowBuilder {
         const maxFrames = Math.round(this.config.maxDurationSec * this.config.sampleRate);
         if (windowFrames > maxFrames) {
             const proposedStart = endFrame - maxFrames;
-            if (proposedStart < this.matureCursorFrame) {
-                startFrame = this.matureCursorFrame;
+            const prerollFrames = Math.max(0, Math.round(this.config.cursorPrerollSec * this.config.sampleRate));
+            const cursorFloor = this.matureCursorFrame > 0
+                ? Math.max(baseFrame, this.matureCursorFrame - prerollFrames)
+                : baseFrame;
+            const minStart = Math.max(cursorFloor, hintFrame);
+            if (proposedStart < minStart) {
+                startFrame = minStart;
             } else {
                 startFrame = proposedStart;
             }

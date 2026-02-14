@@ -77,6 +77,7 @@ describe('WindowBuilder', () => {
             const builder = new WindowBuilder(ring, null, {
                 sampleRate,
                 maxSentences: 2,
+                cursorPrerollSec: 0,
             });
             builder.markSentenceEnd(1000);
             builder.markSentenceEnd(2000);
@@ -109,6 +110,40 @@ describe('WindowBuilder', () => {
             const win = builder.buildWindow();
             expect(win).not.toBeNull();
             expect(win!.durationSeconds).toBeGreaterThanOrEqual(3);
+        });
+
+        it('should respect start hint and clamp window start', () => {
+            const ring = createMockRingBuffer(0, sampleRate * 8);
+            const builder = new WindowBuilder(ring, null, {
+                sampleRate,
+                minDurationSec: 1.0,
+                maxDurationSec: 30,
+                minInitialDurationSec: 0.5,
+                cursorPrerollSec: 0,
+            });
+            builder.markSentenceEnd(sampleRate * 2);
+            builder.advanceMatureCursor(sampleRate * 2);
+
+            const hinted = builder.buildWindow(sampleRate * 5);
+            expect(hinted).not.toBeNull();
+            expect(hinted!.startFrame).toBe(sampleRate * 5);
+        });
+    });
+
+    describe('startHint in initial mode', () => {
+        it('uses start hint during initial window construction', () => {
+            const ring = createMockRingBuffer(0, sampleRate * 5);
+            const builder = new WindowBuilder(ring, null, {
+                sampleRate,
+                minInitialDurationSec: 1.0,
+                maxDurationSec: 30,
+                cursorPrerollSec: 0,
+            });
+
+            const win = builder.buildWindow(sampleRate * 2);
+            expect(win).not.toBeNull();
+            expect(win!.isInitial).toBe(true);
+            expect(win!.startFrame).toBe(sampleRate * 2);
         });
     });
 
@@ -154,6 +189,21 @@ describe('WindowBuilder', () => {
             builder.advanceMatureCursor(1000);
             builder.reset();
             expect(builder.getMatureCursorFrame()).toBe(0);
+        });
+
+        it('applies cursor pre-roll to avoid clipping boundary words', () => {
+            const ring = createMockRingBuffer(0, sampleRate * 5);
+            const builder = new WindowBuilder(ring, null, {
+                sampleRate,
+                minDurationSec: 1.0,
+                minInitialDurationSec: 0.5,
+                cursorPrerollSec: 0.12,
+            });
+            builder.markSentenceEnd(sampleRate * 2);
+            builder.advanceMatureCursor(sampleRate * 2);
+            const win = builder.buildWindow();
+            expect(win).not.toBeNull();
+            expect(win!.startFrame).toBe(sampleRate * 2 - Math.round(sampleRate * 0.12));
         });
     });
 });

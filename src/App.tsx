@@ -64,6 +64,7 @@ let v5ModelNotReadyLogged = false;
 let v5ServiceInitialized = false;
 const V4_CHUNK_MIN_SPEECH_SEC = 0.20;
 const V4_CHUNK_MIN_SPEECH_RATIO = 0.40;
+const V4_SAMPLE_RATE = 16000;
 
 type ChunkSpeechStats = {
   entryCount: number;
@@ -113,7 +114,7 @@ const computeChunkSpeechStats = async (
 
   const entryCount = slice.entryCount;
   const speechRatio = entryCount > 0 ? speechEntryCount / entryCount : 0;
-  const speechDurationSec = (speechEntryCount * slice.hopSamples) / 16000;
+  const speechDurationSec = (speechEntryCount * slice.hopSamples) / V4_SAMPLE_RATE;
   return {
     entryCount,
     speechEntryCount,
@@ -121,6 +122,120 @@ const computeChunkSpeechStats = async (
     speechDurationSec,
     maxProb,
   };
+};
+
+const refineCursorByVadMinProb = async (
+  client: BufferWorkerClient | null,
+  prevCursorSec: number,
+  candidateCursorSec: number,
+): Promise<{ refinedSec: number; source: 'inferenceVad' | 'energyVad' | 'none'; minProb: number; baseProb: number }> => {
+  if (!client) {
+    return { refinedSec: candidateCursorSec, source: 'none', minProb: Number.NaN, baseProb: Number.NaN };
+  }
+
+  const minAdvanceSec = 0.03;
+  const searchBeforeSec = 0.26;
+  const searchAfterSec = 0.16;
+  const maxBackwardShiftSec = 0.20;
+  const maxForwardShiftSec = 0.02;
+
+  if (!Number.isFinite(candidateCursorSec) || candidateCursorSec <= 0) {
+    return { refinedSec: candidateCursorSec, source: 'none', minProb: Number.NaN, baseProb: Number.NaN };
+  }
+  if (candidateCursorSec <= prevCursorSec + minAdvanceSec) {
+    return { refinedSec: candidateCursorSec, source: 'none', minProb: Number.NaN, baseProb: Number.NaN };
+  }
+
+  const searchStartSec = Math.max(prevCursorSec + minAdvanceSec, candidateCursorSec - searchBeforeSec);
+  const searchEndSec = candidateCursorSec + searchAfterSec;
+  const startSample = Math.round(searchStartSec * V4_SAMPLE_RATE);
+  const endSample = Math.round(searchEndSec * V4_SAMPLE_RATE);
+
+  if (endSample <= startSample) {
+    return { refinedSec: candidateCursorSec, source: 'none', minProb: Number.NaN, baseProb: Number.NaN };
+  }
+
+  try {
+    const range = await client.queryRange(startSample, endSample, ['inferenceVad', 'energyVad']);
+    const inferenceSlice = range.layers.inferenceVad;
+    const energySlice = range.layers.energyVad;
+
+    const slice =
+      inferenceSlice && inferenceSlice.entryCount > 0
+        ? inferenceSlice
+        : energySlice && energySlice.entryCount > 0
+          ? energySlice
+          : null;
+
+    if (!slice || !slice.data || slice.data.length === 0) {
+      return { refinedSec: candidateCursorSec, source: 'none', minProb: Number.NaN, baseProb: Number.NaN };
+    }
+
+    const source: 'inferenceVad' | 'energyVad' =
+      slice === inferenceSlice ? 'inferenceVad' : 'energyVad';
+    const scoreDistanceWeight = 0.04;
+
+    const sampleToNearestProb = (
+      targetSample: number,
+      layerSlice: { data: Float32Array; firstEntrySample: number; hopSamples: number } | undefined,
+    ): number => {
+      if (!layerSlice || !layerSlice.data || layerSlice.data.length === 0) return Number.NaN;
+      const idxFloat = (targetSample - layerSlice.firstEntrySample) / layerSlice.hopSamples;
+      const idx = Math.max(0, Math.min(layerSlice.data.length - 1, Math.round(idxFloat)));
+      return layerSlice.data[idx];
+    };
+
+    const candidateSample = Math.round(candidateCursorSec * V4_SAMPLE_RATE);
+    const baseProbRaw = sampleToNearestProb(candidateSample, {
+      data: slice.data,
+      firstEntrySample: slice.firstEntrySample,
+      hopSamples: slice.hopSamples,
+    });
+    const baseProb = Number.isFinite(baseProbRaw) ? baseProbRaw : 1;
+
+    let bestScore = Number.POSITIVE_INFINITY;
+    let bestSample = candidateSample;
+    let bestProb = baseProb;
+
+    for (let i = 0; i < slice.data.length; i++) {
+      const prob = slice.data[i];
+      const sample = slice.firstEntrySample + i * slice.hopSamples;
+      const tSec = sample / V4_SAMPLE_RATE;
+      const distNorm = Math.min(1, Math.abs(tSec - candidateCursorSec) / Math.max(0.001, searchBeforeSec));
+
+      let energyProb = prob;
+      if (energySlice && energySlice.data.length > 0) {
+        const e = sampleToNearestProb(sample, {
+          data: energySlice.data,
+          firstEntrySample: energySlice.firstEntrySample,
+          hopSamples: energySlice.hopSamples,
+        });
+        if (Number.isFinite(e)) energyProb = e;
+      }
+
+      const score = (0.85 * prob) + (0.15 * energyProb) + (scoreDistanceWeight * distNorm);
+      if (score < bestScore) {
+        bestScore = score;
+        bestSample = sample;
+        bestProb = prob;
+      }
+    }
+
+    let refinedSec = bestSample / V4_SAMPLE_RATE;
+    const lower = Math.max(prevCursorSec + minAdvanceSec, candidateCursorSec - maxBackwardShiftSec);
+    const upper = candidateCursorSec + maxForwardShiftSec;
+    refinedSec = Math.max(lower, Math.min(upper, refinedSec));
+
+    // Keep stable if improvement is negligible.
+    const deltaProb = baseProb - bestProb;
+    if (Math.abs(refinedSec - candidateCursorSec) < 0.01 || deltaProb < 0.02) {
+      refinedSec = candidateCursorSec;
+    }
+
+    return { refinedSec, source, minProb: bestProb, baseProb };
+  } catch {
+    return { refinedSec: candidateCursorSec, source: 'none', minProb: Number.NaN, baseProb: Number.NaN };
+  }
 };
 // Throttle UI updates from TEN-VAD to at most once per frame
 let pendingSileroProb: number | null = null;
@@ -534,10 +649,13 @@ const App: Component = () => {
           appStore.setMatureText(flushResult.matureText);
           appStore.setImmatureText(remainingImmature);
           appStore.setPendingText(remainingImmature);
-          appStore.setMatureCursorTime(flushResult.matureCursorTime);
+          const prevCursorSec = windowBuilder.getMatureCursorTime();
+          const refined = await refineCursorByVadMinProb(bufferClient, prevCursorSec, flushResult.matureCursorTime);
+          appStore.setMatureCursorTime(refined.refinedSec);
           appStore.setTranscript(flushResult.fullText || flushResult.matureText);
           // Advance window builder cursor
-          windowBuilder.advanceMatureCursorByTime(flushResult.matureCursorTime);
+          windowBuilder.advanceMatureCursorByTime(refined.refinedSec);
+          windowBuilder.markSentenceEnd(Math.round(refined.refinedSec * V4_SAMPLE_RATE));
           lastWordEndTime = performance.now();
           lastImmatureText = remainingImmature;
           justFinalizedByTimeout = true;
@@ -577,9 +695,12 @@ const App: Component = () => {
           appStore.setMatureText(flushResult.matureText);
           appStore.setImmatureText(remainingImmature);
           appStore.setPendingText(remainingImmature);
-          appStore.setMatureCursorTime(flushResult.matureCursorTime);
+          const prevCursorSec = windowBuilder.getMatureCursorTime();
+          const refined = await refineCursorByVadMinProb(bufferClient, prevCursorSec, flushResult.matureCursorTime);
+          appStore.setMatureCursorTime(refined.refinedSec);
           appStore.setTranscript(flushResult.fullText || flushResult.matureText);
-          windowBuilder.advanceMatureCursorByTime(flushResult.matureCursorTime);
+          windowBuilder.advanceMatureCursorByTime(refined.refinedSec);
+          windowBuilder.markSentenceEnd(Math.round(refined.refinedSec * V4_SAMPLE_RATE));
           lastWordEndTime = performance.now();
           lastImmatureText = remainingImmature;
           justFinalizedByTimeout = true;
@@ -722,9 +843,21 @@ const App: Component = () => {
 
       // Advance cursor if merger advanced it
       if (result.matureCursorTime > windowBuilder.getMatureCursorTime()) {
-        appStore.setMatureCursorTime(result.matureCursorTime);
-        windowBuilder.advanceMatureCursorByTime(result.matureCursorTime);
-        windowBuilder.markSentenceEnd(Math.round(result.matureCursorTime * 16000));
+        const prevCursorSec = windowBuilder.getMatureCursorTime();
+        const refined = await refineCursorByVadMinProb(bufferClient, prevCursorSec, result.matureCursorTime);
+        appStore.setMatureCursorTime(refined.refinedSec);
+        windowBuilder.advanceMatureCursorByTime(refined.refinedSec);
+        windowBuilder.markSentenceEnd(Math.round(refined.refinedSec * V4_SAMPLE_RATE));
+        if (
+          Math.abs(refined.refinedSec - result.matureCursorTime) >= 0.02 &&
+          (v4TickCount <= 10 || v4TickCount % 20 === 0)
+        ) {
+          console.log(
+            `[v4CursorRefine #${v4TickCount}] ${result.matureCursorTime.toFixed(3)}s -> ${refined.refinedSec.toFixed(3)}s ` +
+            `(source=${refined.source}, baseProb=${Number.isFinite(refined.baseProb) ? refined.baseProb.toFixed(3) : 'n/a'}, ` +
+            `minProb=${Number.isFinite(refined.minProb) ? refined.minProb.toFixed(3) : 'n/a'})`
+          );
+        }
       }
 
       // Update stats
