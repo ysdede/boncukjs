@@ -9,7 +9,7 @@ import { HybridVAD } from './lib/vad';
 import { WindowBuilder } from './lib/transcription/WindowBuilder';
 import { BufferWorkerClient } from './lib/buffer';
 import { TenVADWorkerClient } from './lib/vad/TenVADWorkerClient';
-import type { V4ProcessResult } from './lib/transcription/TranscriptionWorkerClient';
+import type { V4ProcessResult, StreamStateResult } from './lib/transcription/TranscriptionWorkerClient';
 import type { BufferWorkerConfig, TenVADResult } from './lib/buffer/types';
 import { formatDuration } from './utils/time';
 
@@ -35,8 +35,93 @@ let v4AudioChunkUnsubscribe: (() => void) | null = null;
 let v4MelChunkUnsubscribe: (() => void) | null = null;
 let v4InferenceBusy = false;
 let v4LastInferenceTime = 0;
+// Track last word timestamp for word-timeout finalization
+let lastWordEndTime = 0;
+let lastImmatureText = '';
+// Track word-timeout finalization to prevent flash from immediate re-processing
+let justFinalizedByTimeout = false;
+// Incremented whenever we finalize/flush live text to drop stale in-flight inference results.
+let v4StateEpoch = 0;
 // Global sample counter for audio chunks (tracks total samples written to BufferWorker)
 let v4GlobalSampleOffset = 0;
+let v4LastGateChunkSample = 0;
+// v5 pipeline runtime
+let v5TickTimeout: number | undefined;
+let v5TickRunning = false;
+let v5AudioChunkUnsubscribe: (() => void) | null = null;
+let v5InferenceBusy = false;
+let v5LastFastInferenceTime = 0;
+let v5LastCorrectionInferenceTime = 0;
+let v5GlobalSampleOffset = 0;
+let v5LastGateChunkSample = 0;
+let v5FastCursorSample = 0;
+let v5LastCorrectionEndSample = 0;
+let v5GateState: 'idle' | 'candidate' | 'active' = 'idle';
+let v5GateReason = 'idle';
+let v5PendingFastRange: { startSample: number; endSample: number } | null = null;
+let v5TickCount = 0;
+let v5ModelNotReadyLogged = false;
+let v5ServiceInitialized = false;
+const V4_CHUNK_MIN_SPEECH_SEC = 0.20;
+const V4_CHUNK_MIN_SPEECH_RATIO = 0.40;
+
+type ChunkSpeechStats = {
+  entryCount: number;
+  speechEntryCount: number;
+  speechRatio: number;
+  speechDurationSec: number;
+  maxProb: number;
+};
+
+const computeChunkSpeechStats = async (
+  client: BufferWorkerClient,
+  layer: 'energyVad' | 'inferenceVad',
+  startSample: number,
+  endSample: number,
+  threshold: number,
+): Promise<ChunkSpeechStats> => {
+  if (endSample <= startSample) {
+    return {
+      entryCount: 0,
+      speechEntryCount: 0,
+      speechRatio: 0,
+      speechDurationSec: 0,
+      maxProb: 0,
+    };
+  }
+
+  const range = await client.queryRange(startSample, endSample, [layer]);
+  const slice = range.layers[layer];
+  if (!slice || slice.entryCount <= 0 || !slice.data) {
+    return {
+      entryCount: 0,
+      speechEntryCount: 0,
+      speechRatio: 0,
+      speechDurationSec: 0,
+      maxProb: 0,
+    };
+  }
+
+  const data = slice.data;
+  let speechEntryCount = 0;
+  let maxProb = 0;
+  for (let i = 0; i < data.length; i++) {
+    const p = data[i];
+    if (p >= threshold) speechEntryCount++;
+    if (p > maxProb) maxProb = p;
+  }
+
+  const entryCount = slice.entryCount;
+  const speechRatio = entryCount > 0 ? speechEntryCount / entryCount : 0;
+  const speechDurationSec = (speechEntryCount * slice.hopSamples) / 16000;
+  return {
+    entryCount,
+    speechEntryCount,
+    speechRatio,
+    speechDurationSec,
+    maxProb,
+  };
+};
 // Throttle UI updates from TEN-VAD to at most once per frame
 let pendingSileroProb: number | null = null;
 let sileroUpdateScheduled = false;
@@ -90,6 +175,71 @@ const scheduleVadStateUpdate = (next: {
     appStore.setIsSpeechDetected(pendingVadState.isSpeech);
     pendingVadState = null;
   });
+};
+
+const applyV5StateToStore = (state: StreamStateResult | null | undefined) => {
+  if (!state) return;
+
+  const tokenConfidence = (t: any): number | undefined => {
+    if (typeof t?.confidence === 'number' && Number.isFinite(t.confidence)) {
+      return Math.min(1, Math.max(0, t.confidence));
+    }
+    if (typeof t?.logProb === 'number' && Number.isFinite(t.logProb)) {
+      return Math.min(1, Math.max(0, Math.exp(Math.max(-20, Math.min(0, t.logProb)))));
+    }
+    return undefined;
+  };
+
+  const stableTokens = (state.stableTokens || []).map((t: any) => ({
+    id: t.id,
+    text: t.text || '',
+    startTime: t.startTime || 0,
+    endTime: t.endTime || 0,
+    logProb: t.logProb,
+    confidence: tokenConfidence(t),
+    finalized: true,
+  }));
+  const draftTokens = (state.draftTokens || []).map((t: any) => ({
+    id: t.id,
+    text: t.text || '',
+    startTime: t.startTime || 0,
+    endTime: t.endTime || 0,
+    logProb: t.logProb,
+    confidence: tokenConfidence(t),
+    finalized: false,
+  }));
+  const sentences = (state.sentences || []).map((s: any) => ({
+    text: s.text || '',
+    startTime: s.startTime || 0,
+    endTime: s.endTime || 0,
+    confidence: s.confidence || 0,
+  }));
+
+  appStore.setV5StableTokens(stableTokens);
+  appStore.setV5DraftTokens(draftTokens);
+  appStore.setV5StableText(state.stableText || '');
+  appStore.setV5DraftText(state.draftText || '');
+  appStore.setV5FullText(state.fullText || '');
+  appStore.setV5CommitCursorTime(state.commitCursorTime || 0);
+  appStore.setV5Sentences(sentences);
+  appStore.setV5TimelineStats((prev) => ({
+    ...prev,
+    rewriteCount: state.stats?.rewriteCount || 0,
+    stableLagSec: state.stats?.stableLagSec || 0,
+    correctionHitRatio: state.stats?.correctionHitRatio || 0,
+    cacheHitRatio: state.stats?.cacheHitRatio || 0,
+    commitCursorTime: state.stats?.commitCursorTime || 0,
+    sentenceBoundaryConfidence: state.stats?.sentenceBoundaryConfidence || 0,
+    gateState: v5GateState,
+    gateReason: v5GateReason,
+  }));
+
+  // Legacy adapter fields for migration compatibility
+  appStore.setMatureText(state.stableText || '');
+  appStore.setImmatureText(state.draftText || '');
+  appStore.setMatureCursorTime(state.commitCursorTime || 0);
+  appStore.setTranscript(state.fullText || '');
+  appStore.setPendingText(state.draftText || '');
 };
 
 const Header: Component<{
@@ -271,6 +421,7 @@ const App: Component = () => {
     clearTimeout(panelHoverCloseTimeout);
     visualizationUnsubscribe?.();
     cleanupV4Pipeline();
+    cleanupV5Pipeline();
     melClient?.dispose();
     workerClient?.dispose();
   });
@@ -279,7 +430,7 @@ const App: Component = () => {
   let v4TickCount = 0;
   let v4ModelNotReadyLogged = false;
   const v4Tick = async () => {
-    if (!workerClient || !windowBuilder || !audioEngine || !bufferClient || v4InferenceBusy) return;
+    if (!workerClient || !windowBuilder || !audioEngine || !bufferClient) return;
 
     // Skip inference if model is not ready (but still allow audio/mel/VAD to process)
     if (appStore.modelState() !== 'ready') {
@@ -303,38 +454,53 @@ const App: Component = () => {
     const minInterval = Math.max(200, appStore.v4InferenceIntervalMs() - 100);
     if (now - v4LastInferenceTime < minInterval) return;
 
-    // Check if there is speech via the BufferWorker (async query).
-    // We check both energy and inference VAD layers; either one detecting speech triggers inference.
-    const cursorSample = windowBuilder.getMatureCursorFrame(); // frame === sample in our pipeline
+    // Evaluate only the latest untranscribed chunk, not full history.
+    // This prevents old speech from keeping gate=true during long silence/noise tails.
+    const ringBaseSample = audioEngine.getRingBuffer().getBaseFrameOffset();
     const currentSample = v4GlobalSampleOffset;
-    const startSample = cursorSample > 0 ? cursorSample : 0;
-
+    const chunkStart = Math.max(v4LastGateChunkSample, ringBaseSample);
+    const chunkEnd = currentSample;
     let hasSpeech = false;
-    if (currentSample > startSample) {
-      // Check energy VAD first (always available, low latency)
-      const energyResult = await bufferClient.hasSpeech('energyVad', startSample, currentSample, 0.3);
+    let energyStats: ChunkSpeechStats | null = null;
+    let inferenceStats: ChunkSpeechStats | null = null;
+    if (chunkEnd > chunkStart) {
+      energyStats = await computeChunkSpeechStats(bufferClient, 'energyVad', chunkStart, chunkEnd, 0.3);
+      const energyValid =
+        energyStats.speechDurationSec >= V4_CHUNK_MIN_SPEECH_SEC ||
+        energyStats.speechRatio >= V4_CHUNK_MIN_SPEECH_RATIO;
 
-      // When inference VAD is ready, require BOTH energy AND inference to agree
-      // This prevents false positives from music/noise that has high energy but no speech
       if (tenVADClient?.isReady()) {
-        const inferenceResult = await bufferClient.hasSpeech('inferenceVad', startSample, currentSample, 0.5);
-        // Require both energy and inference VAD to agree (AND logic)
-        hasSpeech = energyResult.hasSpeech && inferenceResult.hasSpeech;
+        inferenceStats = await computeChunkSpeechStats(
+          bufferClient,
+          'inferenceVad',
+          chunkStart,
+          chunkEnd,
+          appStore.sileroThreshold(),
+        );
+        const inferenceValid =
+          inferenceStats.speechDurationSec >= V4_CHUNK_MIN_SPEECH_SEC ||
+          inferenceStats.speechRatio >= V4_CHUNK_MIN_SPEECH_RATIO;
+        hasSpeech = energyValid && inferenceValid;
       } else {
-        // Fall back to energy-only if inference VAD is not available
-        hasSpeech = energyResult.hasSpeech;
+        hasSpeech = energyValid;
       }
     }
+    v4LastGateChunkSample = chunkEnd;
 
     if (v4TickCount <= 5 || v4TickCount % 20 === 0) {
       const vadState = appStore.vadState();
       const rb = audioEngine.getRingBuffer();
       const rbFrame = rb.getCurrentFrame();
       const rbBase = rb.getBaseFrameOffset();
+      const energyRatio = energyStats ? energyStats.speechRatio : 0;
+      const energyDur = energyStats ? energyStats.speechDurationSec : 0;
+      const infRatio = inferenceStats ? inferenceStats.speechRatio : 0;
+      const infDur = inferenceStats ? inferenceStats.speechDurationSec : 0;
       console.log(
         `[v4Tick #${v4TickCount}] hasSpeech=${hasSpeech}, vadState=${vadState.hybridState}, ` +
         `energy=${vadState.energy.toFixed(4)}, inferenceVAD=${(vadState.sileroProbability || 0).toFixed(2)}, ` +
-        `samples=[${startSample}:${currentSample}], ` +
+        `chunk=[${chunkStart}:${chunkEnd}], energyChunk={dur=${energyDur.toFixed(2)}s, ratio=${(energyRatio * 100).toFixed(0)}%}, ` +
+        `inferenceChunk={dur=${infDur.toFixed(2)}s, ratio=${(infRatio * 100).toFixed(0)}%}, ` +
         `ringBuf=[base=${rbBase}, head=${rbFrame}, avail=${rbFrame - rbBase}]`
       );
     }
@@ -363,26 +529,91 @@ const App: Component = () => {
       try {
         const flushResult = await workerClient.v4FinalizeTimeout();
         if (flushResult) {
+          const remainingImmature = flushResult.immatureText || '';
+          v4StateEpoch++;
           appStore.setMatureText(flushResult.matureText);
-          appStore.setImmatureText(flushResult.immatureText);
+          appStore.setImmatureText(remainingImmature);
+          appStore.setPendingText(remainingImmature);
           appStore.setMatureCursorTime(flushResult.matureCursorTime);
-          appStore.setTranscript(flushResult.fullText);
+          appStore.setTranscript(flushResult.fullText || flushResult.matureText);
           // Advance window builder cursor
           windowBuilder.advanceMatureCursorByTime(flushResult.matureCursorTime);
+          lastWordEndTime = performance.now();
+          lastImmatureText = remainingImmature;
+          justFinalizedByTimeout = true;
+          if (flushResult.debug && (appStore.showDebugPanel() || v4TickCount <= 10 || v4TickCount % 20 === 0)) {
+            console.groupCollapsed(`[v4Merge #${v4TickCount}] Finalize(silence)`);
+            console.log('Finalize debug:', flushResult.debug);
+            console.log('Post-finalize state:', {
+              matureCursorTime: flushResult.matureCursorTime,
+              matureTextTail: (flushResult.matureText || '').slice(-220),
+              immatureText: flushResult.immatureText || '',
+            });
+            console.groupEnd();
+          }
         }
       } catch (err) {
         console.error('[v4Tick] Flush error:', err);
       }
     }
 
+    // Check for word-timeout finalization: if no new words for > threshold, finalize pending text.
+    // This prevents repeated transient pending text updates from being re-merged as duplicates.
+    const wordTimeoutSec = appStore.v4WordTimeoutSec();
+    const timeSinceLastWord = (performance.now() - lastWordEndTime) / 1000;
+    const hasImmatureText = appStore.immatureText().length > 0;
+
+    if (timeSinceLastWord >= wordTimeoutSec && hasImmatureText && lastWordEndTime > 0) {
+      if (v4TickCount <= 10 || v4TickCount % 20 === 0) {
+        console.log(
+          `[v4Tick #${v4TickCount}] Word timeout: ${timeSinceLastWord.toFixed(2)}s >= ${wordTimeoutSec}s, finalizing pending text`
+        );
+      }
+      try {
+        const flushResult = await workerClient.v4FinalizeTimeout();
+        if (flushResult) {
+          const remainingImmature = flushResult.immatureText || '';
+          v4StateEpoch++;
+          appStore.setMatureText(flushResult.matureText);
+          appStore.setImmatureText(remainingImmature);
+          appStore.setPendingText(remainingImmature);
+          appStore.setMatureCursorTime(flushResult.matureCursorTime);
+          appStore.setTranscript(flushResult.fullText || flushResult.matureText);
+          windowBuilder.advanceMatureCursorByTime(flushResult.matureCursorTime);
+          lastWordEndTime = performance.now();
+          lastImmatureText = remainingImmature;
+          justFinalizedByTimeout = true;
+          if (flushResult.debug && (appStore.showDebugPanel() || v4TickCount <= 10 || v4TickCount % 20 === 0)) {
+            console.groupCollapsed(`[v4Merge #${v4TickCount}] Finalize(word-timeout)`);
+            console.log('Finalize debug:', flushResult.debug);
+            console.log('Post-finalize state:', {
+              matureCursorTime: flushResult.matureCursorTime,
+              matureTextTail: (flushResult.matureText || '').slice(-220),
+              immatureText: flushResult.immatureText || '',
+            });
+            console.groupEnd();
+          }
+        }
+      } catch (err) {
+        console.error('[v4Tick] Word timeout finalize error:', err);
+      }
+    }
+
     // After flush attempt, check if we should continue with transcription
-    if (!hasSpeech) {
+    if (!hasSpeech || justFinalizedByTimeout) {
+      if (justFinalizedByTimeout) {
+        justFinalizedByTimeout = false;
+      }
       // No speech detected - return early to avoid unnecessary transcription
       if (v4TickCount <= 10 || v4TickCount % 20 === 0) {
-        console.log(`[v4Tick #${v4TickCount}] No speech, skipping transcription`);
+        const reason = !hasSpeech ? 'No speech' : 'Just finalized by timeout';
+        console.log(`[v4Tick #${v4TickCount}] ${reason}, skipping transcription`);
       }
       return;
     }
+
+    // Keep evaluating gate while an inference is in flight, but don't launch another.
+    if (v4InferenceBusy) return;
 
     // Build window from cursor to current position
     const window = windowBuilder.buildWindow();
@@ -404,6 +635,7 @@ const App: Component = () => {
 
     v4InferenceBusy = true;
     v4LastInferenceTime = now;
+    const requestEpoch = v4StateEpoch;
 
     try {
       const inferenceStart = performance.now();
@@ -441,12 +673,48 @@ const App: Component = () => {
 
       const inferenceMs = performance.now() - inferenceStart;
 
+      // Ignore stale results that started before a finalize/flush event.
+      if (requestEpoch !== v4StateEpoch) {
+        if (v4TickCount <= 10 || v4TickCount % 20 === 0) {
+          console.log(`[v4Tick #${v4TickCount}] Dropping stale inference result (epoch ${requestEpoch} -> ${v4StateEpoch})`);
+        }
+        return;
+      }
+
       // Update UI state
       appStore.setMatureText(result.matureText);
       appStore.setImmatureText(result.immatureText);
       appStore.setTranscript(result.fullText);
       appStore.setPendingText(result.immatureText);
       appStore.setInferenceLatency(inferenceMs);
+
+      // Track when we receive new pending words for timeout-based finalization.
+      if (result.immatureText !== lastImmatureText && result.immatureText.length > 0) {
+        lastWordEndTime = performance.now();
+        lastImmatureText = result.immatureText;
+      }
+
+      if (result.debug && (appStore.showDebugPanel() || v4TickCount <= 10 || v4TickCount % 12 === 0)) {
+        console.groupCollapsed(
+          `[v4Merge #${v4TickCount}] win=[${(result.debug.windowStartSec || 0).toFixed(2)}-${(result.debug.windowEndSec || 0).toFixed(2)}] ` +
+          `cursor=${result.matureCursorTime.toFixed(2)} totalSent=${result.totalSentences} mature=${result.matureSentenceCount}`
+        );
+        console.log('ASR:', {
+          text: result.debug.asrText,
+          wordCount: result.debug.asrWordCount,
+          startSec: result.debug.asrStartSec,
+          endSec: result.debug.asrEndSec,
+          segmentId: result.debug.segmentId,
+        });
+        console.log('Merge decision:', result.debug.merge);
+        console.log('Output:', {
+          matureTextTail: (result.matureText || '').slice(-220),
+          immatureText: result.immatureText || '',
+          fullTextTail: (result.fullText || '').slice(-260),
+          pendingSentence: result.pendingSentence,
+        });
+        console.groupEnd();
+      }
 
       // Update RTF
       const audioDurationMs = window.durationSeconds * 1000;
@@ -487,6 +755,227 @@ const App: Component = () => {
     }
   };
 
+  const runV5Fast = async (startSample: number, endSample: number, immediate = false) => {
+    if (!workerClient || !melClient || !audioEngine) return;
+    if (endSample <= startSample) return;
+    if (v5InferenceBusy) {
+      v5PendingFastRange = { startSample, endSample };
+      return;
+    }
+
+    v5InferenceBusy = true;
+    v5LastFastInferenceTime = performance.now();
+
+    try {
+      const inferenceStart = performance.now();
+      const features = await melClient.getFeatures(startSample, endSample);
+      if (!features) return;
+
+      const result = await workerClient.processV5Fast({
+        features: features.features,
+        T: features.T,
+        melBins: features.melBins,
+        timeOffset: startSample / 16000,
+        endTime: endSample / 16000,
+        allowDecoderContinuation: !immediate,
+      });
+
+      applyV5StateToStore(result);
+      v5FastCursorSample = Math.max(v5FastCursorSample, endSample);
+
+      const inferenceMs = performance.now() - inferenceStart;
+      const audioDurationMs = ((endSample - startSample) / 16000) * 1000;
+      if (audioDurationMs > 0) {
+        appStore.setRtf(inferenceMs / audioDurationMs);
+      }
+      appStore.setInferenceLatency(inferenceMs);
+
+      const ring = audioEngine.getRingBuffer();
+      appStore.setBufferMetrics({
+        fillRatio: ring.getFillCount() / ring.getSize(),
+        latencyMs: (ring.getFillCount() / 16000) * 1000,
+      });
+    } catch (err) {
+      console.error('[v5Fast] Inference error:', err);
+    } finally {
+      v5InferenceBusy = false;
+      if (v5PendingFastRange && appStore.recordingState() === 'recording') {
+        const pending = v5PendingFastRange;
+        v5PendingFastRange = null;
+        queueMicrotask(() => {
+          runV5Fast(pending.startSample, pending.endSample);
+        });
+      }
+    }
+  };
+
+  const runV5Correction = async (startSample: number, endSample: number, overlapSec: number) => {
+    if (!workerClient || !melClient) return;
+    if (endSample <= startSample) return;
+    if (v5InferenceBusy) return;
+
+    v5InferenceBusy = true;
+    v5LastCorrectionInferenceTime = performance.now();
+
+    try {
+      const features = await melClient.getFeatures(startSample, endSample);
+      if (!features) return;
+
+      const result = await workerClient.processV5Correction({
+        features: features.features,
+        T: features.T,
+        melBins: features.melBins,
+        timeOffset: startSample / 16000,
+        endTime: endSample / 16000,
+        incrementalCache: overlapSec > 0 ? {
+          cacheKey: 'v5-correction',
+          prefixSeconds: overlapSec,
+        } : undefined,
+      });
+
+      applyV5StateToStore(result);
+      v5LastCorrectionEndSample = Math.max(v5LastCorrectionEndSample, endSample);
+    } catch (err) {
+      console.error('[v5Correction] Inference error:', err);
+    } finally {
+      v5InferenceBusy = false;
+    }
+  };
+
+  const v5Tick = async () => {
+    if (!workerClient || !audioEngine || !bufferClient || !melClient) return;
+
+    if (appStore.modelState() !== 'ready') {
+      if (!v5ModelNotReadyLogged) {
+        console.log('[v5Tick] Model not ready yet - collecting audio/mel/VAD');
+        v5ModelNotReadyLogged = true;
+      }
+      return;
+    }
+    if (v5ModelNotReadyLogged) {
+      v5ModelNotReadyLogged = false;
+      console.log('[v5Tick] Model ready - starting v5 stream');
+    }
+    if (!v5ServiceInitialized) {
+      await workerClient.initV5Stream({
+        stabilityLagSec: appStore.v5StabilityLagSec(),
+        correctionConfirmations: 2,
+        debug: false,
+      });
+      v5ServiceInitialized = true;
+    }
+
+    v5TickCount += 1;
+    const now = performance.now();
+    const currentSample = v5GlobalSampleOffset;
+    const ringBaseSample = audioEngine.getRingBuffer().getBaseFrameOffset();
+
+    const chunkStart = Math.max(v5LastGateChunkSample, ringBaseSample);
+    const chunkEnd = currentSample;
+    if (chunkEnd <= chunkStart) {
+      return;
+    }
+
+    const energyResult = await bufferClient.hasSpeech('energyVad', chunkStart, chunkEnd, 0.3);
+    const inferenceResult = tenVADClient?.isReady()
+      ? await bufferClient.hasSpeech('inferenceVad', chunkStart, chunkEnd, appStore.sileroThreshold())
+      : null;
+
+    const energyValid = energyResult.hasSpeech;
+    const inferenceValid = inferenceResult ? inferenceResult.hasSpeech : true;
+    const chunkValid = tenVADClient?.isReady() ? (energyValid && inferenceValid) : energyValid;
+
+    const prevGate = v5GateState;
+    if (chunkValid) {
+      if (v5GateState === 'idle') {
+        v5GateState = 'candidate';
+        v5GateReason = tenVADClient?.isReady() ? 'chunk valid (energy+inference)' : 'chunk valid (energy)';
+      } else {
+        v5GateState = 'active';
+        v5GateReason = 'gate active';
+      }
+    } else {
+      const silenceDuration = await bufferClient.getSilenceTailDuration('energyVad', 0.3);
+      if (silenceDuration >= appStore.v4SilenceFlushSec()) {
+        if (v5GateState !== 'idle') {
+          const correctionWindowSamples = Math.max(
+            Math.round(appStore.v5CorrectionWindowSec() * 16000),
+            Math.round(appStore.v5CorrectionOverlapSec() * 16000),
+          );
+          const correctionStart = Math.max(ringBaseSample, currentSample - correctionWindowSamples);
+          const correctionOverlapSec = Math.min(
+            appStore.v5CorrectionOverlapSec(),
+            (currentSample - correctionStart) / 16000,
+          );
+          if (!v5InferenceBusy && currentSample > correctionStart) {
+            await runV5Correction(correctionStart, currentSample, correctionOverlapSec);
+          }
+          const finalState = await workerClient.v5FinalizeSilence(currentSample / 16000);
+          applyV5StateToStore(finalState);
+        }
+        v5GateState = 'idle';
+        v5GateReason = `silence flush (${silenceDuration.toFixed(2)}s)`;
+      } else if (v5GateState === 'active') {
+        v5GateState = 'candidate';
+        v5GateReason = 'awaiting speech confirmation';
+      } else {
+        v5GateState = 'idle';
+        v5GateReason = 'chunk invalid';
+      }
+    }
+
+    v5LastGateChunkSample = chunkEnd;
+    appStore.setV5TimelineStats((prev) => ({
+      ...prev,
+      gateState: v5GateState,
+      gateReason: v5GateReason,
+    }));
+
+    if (v5TickCount <= 5 || v5TickCount % 20 === 0) {
+      console.log(
+        `[v5Tick #${v5TickCount}] gate=${v5GateState}, chunkValid=${chunkValid}, ` +
+        `energy=${energyValid}, inference=${inferenceResult ? inferenceValid : 'n/a'}, ` +
+        `chunk=[${chunkStart}:${chunkEnd}], fastCursor=${v5FastCursorSample}`
+      );
+    }
+
+    const activatedNow = prevGate !== 'active' && v5GateState === 'active';
+    const gateAllowsInference = v5GateState === 'active';
+    if (!gateAllowsInference) return;
+
+    const fastIntervalMs = Math.max(240, appStore.v4InferenceIntervalMs());
+    const hasNewFastAudio = chunkEnd > Math.max(v5FastCursorSample, ringBaseSample);
+    const fastDue = activatedNow || (now - v5LastFastInferenceTime >= fastIntervalMs);
+
+    if (hasNewFastAudio && fastDue) {
+      const fastStart = Math.max(v5FastCursorSample, ringBaseSample);
+      const fastEnd = chunkEnd;
+      if (v5InferenceBusy) {
+        v5PendingFastRange = { startSample: fastStart, endSample: fastEnd };
+      } else {
+        await runV5Fast(fastStart, fastEnd, activatedNow);
+      }
+    }
+
+    const correctionIntervalMs = Math.max(480, appStore.v5CorrectionIntervalMs());
+    const correctionDue = now - v5LastCorrectionInferenceTime >= correctionIntervalMs;
+    const hasNewCorrectionAudio = chunkEnd > Math.max(v5LastCorrectionEndSample, ringBaseSample);
+
+    if (!v5InferenceBusy && correctionDue && hasNewCorrectionAudio) {
+      const correctionWindowSamples = Math.max(
+        Math.round(appStore.v5CorrectionWindowSec() * 16000),
+        Math.round(appStore.v5CorrectionOverlapSec() * 16000),
+      );
+      const correctionEnd = chunkEnd;
+      const correctionStart = Math.max(ringBaseSample, correctionEnd - correctionWindowSamples);
+      const overlapSec = Math.min(
+        appStore.v5CorrectionOverlapSec(),
+        (correctionEnd - correctionStart) / 16000,
+      );
+      await runV5Correction(correctionStart, correctionEnd, overlapSec);
+    }
+  };
+
   // ---- Cleanup v4 pipeline resources ----
   const cleanupV4Pipeline = () => {
     v4TickRunning = false;
@@ -515,6 +1004,50 @@ const App: Component = () => {
     v4InferenceBusy = false;
     v4LastInferenceTime = 0;
     v4GlobalSampleOffset = 0;
+    v4LastGateChunkSample = 0;
+    lastWordEndTime = 0;
+    lastImmatureText = '';
+    justFinalizedByTimeout = false;
+    v4StateEpoch = 0;
+  };
+
+  const cleanupV5Pipeline = () => {
+    v5TickRunning = false;
+    if (v5TickTimeout) {
+      clearTimeout(v5TickTimeout);
+      v5TickTimeout = undefined;
+    }
+    if (v5AudioChunkUnsubscribe) {
+      v5AudioChunkUnsubscribe();
+      v5AudioChunkUnsubscribe = null;
+    }
+    hybridVAD = null;
+    if (tenVADClient) {
+      tenVADClient.dispose();
+      tenVADClient = null;
+    }
+    if (bufferClient) {
+      bufferClient.dispose();
+      bufferClient = null;
+    }
+    v5InferenceBusy = false;
+    v5LastFastInferenceTime = 0;
+    v5LastCorrectionInferenceTime = 0;
+    v5GlobalSampleOffset = 0;
+    v5LastGateChunkSample = 0;
+    v5FastCursorSample = 0;
+    v5LastCorrectionEndSample = 0;
+    v5GateState = 'idle';
+    v5GateReason = 'idle';
+    v5PendingFastRange = null;
+    v5TickCount = 0;
+    v5ModelNotReadyLogged = false;
+    v5ServiceInitialized = false;
+    appStore.setV5TimelineStats((prev) => ({
+      ...prev,
+      gateState: 'idle',
+      gateReason: 'idle',
+    }));
   };
 
   const toggleRecording = async () => {
@@ -533,6 +1066,7 @@ const App: Component = () => {
         if (windowUnsubscribe) windowUnsubscribe();
         if (melChunkUnsubscribe) melChunkUnsubscribe();
         cleanupV4Pipeline();
+        cleanupV5Pipeline();
 
         if (workerClient) {
           const final = await workerClient.finalize();
@@ -566,14 +1100,23 @@ const App: Component = () => {
 
         const mode = appStore.transcriptionMode();
 
-        // v4 mode: Always start audio capture, mel preprocessing, and VAD
-        // Inference only runs when model is ready (checked in v4Tick)
-        if (mode === 'v4-utterance') {
-          // ---- v4: Utterance-based pipeline with BufferWorker + TEN-VAD ----
+        // v4/v5 modes: always start audio capture, mel preprocessing, and VAD.
+        // Inference starts when the model is ready.
+        if (mode === 'v4-utterance' || mode === 'v5-streaming') {
+          const isV5Mode = mode === 'v5-streaming';
+          // ---- v4/v5: shared capture + VAD stack ----
 
-          // Initialize merger in worker only if model is ready
           if (isModelReady() && workerClient) {
-            await workerClient.initV4Service({ debug: false });
+            if (isV5Mode) {
+              await workerClient.initV5Stream({
+                stabilityLagSec: appStore.v5StabilityLagSec(),
+                correctionConfirmations: 2,
+                debug: false,
+              });
+              v5ServiceInitialized = true;
+            } else {
+              await workerClient.initV4Service({ debug: false });
+            }
           }
 
           // Initialize mel worker (always needed for preprocessing)
@@ -637,18 +1180,37 @@ const App: Component = () => {
           // NOTE: WindowBuilder is created AFTER audioEngine.start() below,
           // because start() may re-create the internal RingBuffer.
 
-          // Reset global sample counter
-          v4GlobalSampleOffset = 0;
+          // Reset sample counters
+          if (isV5Mode) {
+            v5GlobalSampleOffset = 0;
+            v5LastGateChunkSample = 0;
+            v5FastCursorSample = 0;
+            v5LastCorrectionEndSample = 0;
+            v5GateState = 'idle';
+            v5GateReason = 'idle';
+            v5PendingFastRange = null;
+          } else {
+            v4GlobalSampleOffset = 0;
+            v4LastGateChunkSample = 0;
+            lastWordEndTime = 0;
+            lastImmatureText = '';
+            justFinalizedByTimeout = false;
+            v4StateEpoch = 0;
+          }
 
-          // Feed audio chunks to mel worker from the main v4 audio handler below
+          // Feed audio chunks to mel worker from the main audio handler below
           v4MelChunkUnsubscribe = null;
 
           // Process each audio chunk: energy VAD + write to BufferWorker + forward to TEN-VAD
-          v4AudioChunkUnsubscribe = audioEngine.onAudioChunk((chunk) => {
+          const audioChunkHandler = (chunk: Float32Array) => {
             if (!hybridVAD || !bufferClient) return;
 
-            const chunkOffset = v4GlobalSampleOffset;
-            v4GlobalSampleOffset += chunk.length;
+            const chunkOffset = isV5Mode ? v5GlobalSampleOffset : v4GlobalSampleOffset;
+            if (isV5Mode) {
+              v5GlobalSampleOffset += chunk.length;
+            } else {
+              v4GlobalSampleOffset += chunk.length;
+            }
 
             // 1. Run energy VAD (synchronous, fast) and write to BufferWorker
             const vadResult = hybridVAD.processEnergyOnly(chunk);
@@ -674,20 +1236,38 @@ const App: Component = () => {
               hybridState: vadResult.state,
               ...(sileroProbability !== undefined ? { sileroProbability } : {}),
             });
-          });
+          };
+          if (isV5Mode) {
+            v5AudioChunkUnsubscribe = audioEngine.onAudioChunk(audioChunkHandler);
+          } else {
+            v4AudioChunkUnsubscribe = audioEngine.onAudioChunk(audioChunkHandler);
+          }
 
           // Start adaptive inference tick loop (reads interval from appStore)
-          // Note: v4Tick internally checks if model is ready before running inference
-          v4TickRunning = true;
-          const scheduleNextTick = () => {
-            if (!v4TickRunning) return;
-            v4TickTimeout = window.setTimeout(async () => {
+          if (isV5Mode) {
+            v5TickRunning = true;
+            const scheduleNextTick = () => {
+              if (!v5TickRunning) return;
+              v5TickTimeout = window.setTimeout(async () => {
+                if (!v5TickRunning) return;
+                await v5Tick();
+                scheduleNextTick();
+              }, appStore.v4InferenceIntervalMs());
+            };
+            scheduleNextTick();
+          } else {
+            // Note: v4Tick internally checks if model is ready before running inference
+            v4TickRunning = true;
+            const scheduleNextTick = () => {
               if (!v4TickRunning) return;
-              await v4Tick();
-              scheduleNextTick();
-            }, appStore.v4InferenceIntervalMs());
-          };
-          scheduleNextTick();
+              v4TickTimeout = window.setTimeout(async () => {
+                if (!v4TickRunning) return;
+                await v4Tick();
+                scheduleNextTick();
+              }, appStore.v4InferenceIntervalMs());
+            };
+            scheduleNextTick();
+          }
 
         } else if (isModelReady() && workerClient) {
           // v3 and v2 modes still require model to be ready
@@ -811,7 +1391,7 @@ const App: Component = () => {
         // Bar levels from AnalyserNode (native FFT, low CPU) instead of mel worker.
         visualizationUnsubscribe = audioEngine.onVisualizationUpdate((_data, metrics) => {
           appStore.setAudioLevel(metrics.currentEnergy);
-          if (appStore.transcriptionMode() !== 'v4-utterance') {
+          if (appStore.transcriptionMode() !== 'v4-utterance' && appStore.transcriptionMode() !== 'v5-streaming') {
             appStore.setIsSpeechDetected(audioEngine?.isSpeechActive() ?? false);
           }
           appStore.setBarLevels(audioEngine!.getBarLevels());
@@ -892,12 +1472,23 @@ const App: Component = () => {
         <main class="flex-1 overflow-y-auto custom-scrollbar px-6 flex flex-col items-center">
           <div class="max-w-3xl w-full py-12 lg:py-20">
             <TranscriptionDisplay
-              confirmedText={appStore.transcriptionMode() === 'v4-utterance' ? appStore.matureText() : appStore.transcript()}
-              pendingText={appStore.transcriptionMode() === 'v4-utterance' ? appStore.immatureText() : appStore.pendingText()}
+              confirmedText={appStore.transcriptionMode() === 'v4-utterance'
+                ? appStore.matureText()
+                : appStore.transcriptionMode() === 'v5-streaming'
+                  ? appStore.v5StableText()
+                  : appStore.transcript()}
+              pendingText={appStore.transcriptionMode() === 'v4-utterance'
+                ? appStore.immatureText()
+                : appStore.transcriptionMode() === 'v5-streaming'
+                  ? appStore.v5DraftText()
+                  : appStore.pendingText()}
+              confirmedTokens={appStore.transcriptionMode() === 'v5-streaming' ? appStore.v5StableTokens() : undefined}
+              pendingTokens={appStore.transcriptionMode() === 'v5-streaming' ? appStore.v5DraftTokens() : undefined}
               isRecording={isRecording()}
               lcsLength={appStore.mergeInfo().lcsLength}
               anchorValid={appStore.mergeInfo().anchorValid}
               showConfidence={appStore.transcriptionMode() === 'v3-streaming'}
+              colorByConfidence={appStore.transcriptionMode() === 'v5-streaming'}
               class="min-h-[40vh]"
             />
           </div>

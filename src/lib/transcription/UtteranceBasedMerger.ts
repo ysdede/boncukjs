@@ -70,6 +70,24 @@ export interface MergerResult {
     stats: MergerStats;
     utteranceCount: number;
     lastUtteranceText: string;
+    debug?: MergerDebugSnapshot | null;
+}
+
+export interface MergerDebugSnapshot {
+    utteranceId: string;
+    asrText: string;
+    asrWordCount: number;
+    asrStartTime: number;
+    asrEndTime: number;
+    detectedSentenceCount: number;
+    matureSentenceCountInChunk: number;
+    pendingSentenceText: string | null;
+    pendingEndsWithPunctuation: boolean;
+    matureCursorBefore: number;
+    matureCursorAfter: number;
+    matureTextTail: string;
+    immatureText: string;
+    reasons: string[];
 }
 
 /** Statistics for the merger */
@@ -138,6 +156,7 @@ export class UtteranceBasedMerger {
     // This tracks ONLY the unfinalized portion of text that should be appended to mature sentences
     private liveBufferText: string = '';
     private lastFinalizedSentenceEnd: number = 0;
+    private lastDebugSnapshot: MergerDebugSnapshot | null = null;
 
     // Statistics
     private stats: MergerStats = {
@@ -228,6 +247,7 @@ export class UtteranceBasedMerger {
         }
         this.currentUtteranceText = utterance_text.trim();
         this.stats.utterancesProcessed++;
+        const matureCursorBefore = this.matureCursorTime;
 
         // Detect sentences
         const sentenceResult = this.detectSentencesInUtterance(utterance);
@@ -247,8 +267,6 @@ export class UtteranceBasedMerger {
                     isMature: false,
                 };
             }
-        } else {
-            this.pendingSentence = null;
         }
 
         // Update mature cursor
@@ -257,6 +275,37 @@ export class UtteranceBasedMerger {
         }
 
         utterance.processed = true;
+
+        const matureCursorAfter = this.matureCursorTime;
+        const pendingText = this.pendingSentence?.text || null;
+        const asrStartTime = detectorWords.length > 0 ? detectorWords[0].start : 0;
+        const asrEndTime = detectorWords.length > 0 ? detectorWords[detectorWords.length - 1].end : 0;
+        const reasons: string[] = [];
+        if (sentenceResult.totalSentences > 0) reasons.push('sentences_detected');
+        if (sentenceResult.matureSentences.length > 0) reasons.push('mature_sentence_emitted');
+        if (matureCursorAfter > matureCursorBefore) reasons.push('mature_cursor_advanced');
+        if (pendingText) reasons.push('pending_sentence_present');
+        if (!pendingText && sentenceResult.totalSentences === 0) reasons.push('no_sentence_boundary');
+        if (pendingText && !this.isSentenceCompleteByPunctuation(pendingText)) reasons.push('pending_without_terminal_punctuation');
+        if (matureCursorAfter === matureCursorBefore && sentenceResult.totalSentences > 0) reasons.push('cursor_not_advanced_this_chunk');
+        const matureText = this.getMatureText();
+        const matureTail = matureText.length > 220 ? matureText.slice(-220) : matureText;
+        this.lastDebugSnapshot = {
+            utteranceId: utterance.id,
+            asrText: utterance.text,
+            asrWordCount: detectorWords.length,
+            asrStartTime,
+            asrEndTime,
+            detectedSentenceCount: sentenceResult.totalSentences,
+            matureSentenceCountInChunk: sentenceResult.matureSentences.length,
+            pendingSentenceText: pendingText,
+            pendingEndsWithPunctuation: pendingText ? this.isSentenceCompleteByPunctuation(pendingText) : false,
+            matureCursorBefore,
+            matureCursorAfter,
+            matureTextTail: matureTail,
+            immatureText: this.liveBufferText || '',
+            reasons,
+        };
 
         return this.createResult(sentenceResult);
     }
@@ -451,12 +500,30 @@ export class UtteranceBasedMerger {
         }
 
         const matureSentences: MergerSentence[] = [];
+        const configuredOffset = Number.isFinite(this.config.matureSentenceOffset)
+            ? Math.trunc(this.config.matureSentenceOffset)
+            : -1;
 
-        if (sentences.length >= 2) {
-            const sentencesToMature = sentences.slice(0, -1);
+        // Negative offset means "keep last N sentences immature" (default -2).
+        // Example: len=3, offset=-2 => matureCount=1 (only the oldest sentence matures).
+        let matureCount = configuredOffset < 0
+            ? sentences.length + configuredOffset
+            : configuredOffset;
 
-            sentencesToMature.forEach((sentence, index) => {
-                const sentenceEndingWord = sentenceEndings[index];
+        matureCount = Math.max(0, Math.min(sentences.length, matureCount));
+
+        if (this.config.requireFollowingSentence && matureCount >= sentences.length) {
+            matureCount = Math.max(0, sentences.length - 1);
+        }
+
+        if (matureCount > 0) {
+            const sentencesToMature = sentences.slice(0, matureCount);
+
+            sentencesToMature.forEach((sentence) => {
+                const sentenceIndex = sentence.endWordIndex;
+                const endingIdx = sentenceEndings.findIndex(e => e.wordIndex === sentenceIndex);
+                const sentenceEndingWord =
+                    endingIdx >= 0 ? sentenceEndings[endingIdx] : undefined;
 
                 const matureSentence: MergerSentence = {
                     ...sentence,
@@ -505,7 +572,8 @@ export class UtteranceBasedMerger {
 
             if (this.config.debug) {
                 console.log(
-                    `[UtteranceMerger] Created ${matureSentences.length} mature sentences from ${sentences.length} total`
+                    `[UtteranceMerger] Created ${matureSentences.length} mature sentences from ${sentences.length} total ` +
+                    `(offset=${configuredOffset}, requireFollowing=${this.config.requireFollowingSentence})`
                 );
             }
         }
@@ -616,6 +684,7 @@ export class UtteranceBasedMerger {
             stats: { ...this.stats },
             utteranceCount: this.utterances.length,
             lastUtteranceText: this.currentUtteranceText,
+            debug: this.lastDebugSnapshot,
         };
     }
 
@@ -639,6 +708,7 @@ export class UtteranceBasedMerger {
         }
 
         const candidate = this.pendingSentence;
+        const cursorBefore = this.matureCursorTime;
 
         // Only finalize if sentence ends with proper punctuation
         if (!this.isSentenceCompleteByPunctuation(candidate.text)) {
@@ -686,10 +756,70 @@ export class UtteranceBasedMerger {
                     `[UtteranceMerger] Timeout finalized sentence: "${candidate.text}" @ ${candidate.wordEndTime?.toFixed?.(2) ?? candidate.wordEndTime}s`
                 );
             }
+            this.lastDebugSnapshot = {
+                utteranceId: candidate.utteranceId || 'timeout-finalize',
+                asrText: this.currentUtteranceText,
+                asrWordCount: candidate.wordCount,
+                asrStartTime: candidate.startTime,
+                asrEndTime: candidate.endTime,
+                detectedSentenceCount: 1,
+                matureSentenceCountInChunk: 1,
+                pendingSentenceText: candidate.text,
+                pendingEndsWithPunctuation: this.isSentenceCompleteByPunctuation(candidate.text),
+                matureCursorBefore: cursorBefore,
+                matureCursorAfter: this.matureCursorTime,
+                matureTextTail: this.getMatureText().slice(-220),
+                immatureText: this.liveBufferText || '',
+                reasons: ['timeout_finalize'],
+            };
         }
 
+        // Consume only the finalized prefix from live text; keep any remaining tail.
+        this.consumeFinalizedPrefixFromLiveBuffer(candidate.text);
         this.pendingSentence = null;
         return this.createResult();
+    }
+
+    private consumeFinalizedPrefixFromLiveBuffer(finalizedSentence: string): void {
+        const live = (this.liveBufferText || '').trim();
+        const finalized = (finalizedSentence || '').trim();
+        if (!live) {
+            this.liveBufferText = '';
+            return;
+        }
+        if (!finalized) {
+            this.liveBufferText = live;
+            return;
+        }
+        if (live === finalized) {
+            this.liveBufferText = '';
+            return;
+        }
+        if (live.startsWith(finalized)) {
+            this.liveBufferText = live.slice(finalized.length).trim();
+            return;
+        }
+
+        // Token-prefix fallback for minor punctuation/tokenization differences.
+        const normalizeToken = (token: string): string =>
+            token.toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+        const liveTokens = live.split(/\s+/).filter(Boolean);
+        const finalizedTokens = finalized.split(/\s+/).filter(Boolean);
+        let matched = 0;
+        while (
+            matched < liveTokens.length &&
+            matched < finalizedTokens.length &&
+            normalizeToken(liveTokens[matched]) === normalizeToken(finalizedTokens[matched])
+        ) {
+            matched++;
+        }
+        if (matched === finalizedTokens.length) {
+            this.liveBufferText = liveTokens.slice(matched).join(' ').trim();
+            return;
+        }
+
+        // No safe prefix match; preserve live text to avoid word loss.
+        this.liveBufferText = live;
     }
 
     /**
@@ -718,6 +848,7 @@ export class UtteranceBasedMerger {
         // Reset live buffer tracking
         this.liveBufferText = '';
         this.lastFinalizedSentenceEnd = -1;
+        this.lastDebugSnapshot = null;
         this.stats = {
             utterancesProcessed: 0,
             sentencesDetected: 0,
@@ -765,6 +896,10 @@ export class UtteranceBasedMerger {
             matureSentenceCount: this.matureSentences.length,
             utteranceCount: this.utterances.length,
         };
+    }
+
+    getLastDebugSnapshot(): MergerDebugSnapshot | null {
+        return this.lastDebugSnapshot;
     }
 }
 
