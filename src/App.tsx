@@ -350,24 +350,36 @@ const App: Component = () => {
       } catch (_) { /* ignore state query errors */ }
     }
 
-    if (!hasSpeech) {
-      // Check for silence-based flush using BufferWorker
-      const silenceDuration = await bufferClient.getSilenceTailDuration('energyVad', 0.3);
-      if (silenceDuration >= appStore.v4SilenceFlushSec()) {
-        // Flush pending sentence via timeout finalization
-        try {
-          const flushResult = await workerClient.v4FinalizeTimeout();
-          if (flushResult) {
-            appStore.setMatureText(flushResult.matureText);
-            appStore.setImmatureText(flushResult.immatureText);
-            appStore.setMatureCursorTime(flushResult.matureCursorTime);
-            appStore.setTranscript(flushResult.fullText);
-            // Advance window builder cursor
-            windowBuilder.advanceMatureCursorByTime(flushResult.matureCursorTime);
-          }
-        } catch (err) {
-          console.error('[v4Tick] Flush error:', err);
+    // Check for silence-based flush FIRST (regardless of hasSpeech)
+    // This ensures pending sentences get finalized when user stops speaking
+    const silenceDuration = await bufferClient.getSilenceTailDuration('energyVad', 0.3);
+    const hasPendingText = windowBuilder.getMatureCursorFrame() > 0;
+    
+    if (silenceDuration >= appStore.v4SilenceFlushSec() && hasPendingText) {
+      // Flush pending sentence via timeout finalization
+      if (v4TickCount <= 10 || v4TickCount % 20 === 0) {
+        console.log(`[v4Tick #${v4TickCount}] Silence flush: ${silenceDuration.toFixed(2)}s >= ${appStore.v4SilenceFlushSec()}s`);
+      }
+      try {
+        const flushResult = await workerClient.v4FinalizeTimeout();
+        if (flushResult) {
+          appStore.setMatureText(flushResult.matureText);
+          appStore.setImmatureText(flushResult.immatureText);
+          appStore.setMatureCursorTime(flushResult.matureCursorTime);
+          appStore.setTranscript(flushResult.fullText);
+          // Advance window builder cursor
+          windowBuilder.advanceMatureCursorByTime(flushResult.matureCursorTime);
         }
+      } catch (err) {
+        console.error('[v4Tick] Flush error:', err);
+      }
+    }
+
+    // After flush attempt, check if we should continue with transcription
+    if (!hasSpeech) {
+      // No speech detected - return early to avoid unnecessary transcription
+      if (v4TickCount <= 10 || v4TickCount % 20 === 0) {
+        console.log(`[v4Tick #${v4TickCount}] No speech, skipping transcription`);
       }
       return;
     }
