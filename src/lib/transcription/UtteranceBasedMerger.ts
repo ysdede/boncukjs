@@ -133,6 +133,11 @@ export class UtteranceBasedMerger {
     private currentUtteranceText: string = '';
     private matureCursorTime: number = 0;
     private pendingSentence: MergerSentence | null = null;
+    
+    // Live buffer tracking to prevent duplicates during sentence finalization
+    // This tracks ONLY the unfinalized portion of text that should be appended to mature sentences
+    private liveBufferText: string = '';
+    private lastFinalizedSentenceEnd: number = 0;
 
     // Statistics
     private stats: MergerStats = {
@@ -226,7 +231,10 @@ export class UtteranceBasedMerger {
 
         // Detect sentences
         const sentenceResult = this.detectSentencesInUtterance(utterance);
-
+        
+        // Update live buffer to track only unfinalized text (prevents duplicates)
+        this.updateLiveBuffer(utterance, sentenceResult);
+        
         // Track the most recent ended sentence as a pending candidate
         if (sentenceResult && sentenceResult.sentences && sentenceResult.sentences.length > 0) {
             const lastEndedSentence = sentenceResult.sentences[sentenceResult.sentences.length - 1];
@@ -251,6 +259,42 @@ export class UtteranceBasedMerger {
         utterance.processed = true;
 
         return this.createResult(sentenceResult);
+    }
+
+    /**
+     * Update the live buffer to track only unfinalized text.
+     * This prevents duplicates by marking live text as finalized immediately when sentences are detected.
+     */
+    private updateLiveBuffer(utterance: Utterance, sentenceResult: SentenceDetectionResult): void {
+        const { text, words } = utterance;
+        
+        // If we have mature sentences, the live portion is what comes after the last mature sentence
+        if (sentenceResult.matureSentences.length > 0) {
+            const lastMature = sentenceResult.matureSentences[sentenceResult.matureSentences.length - 1];
+            
+            // The live portion starts after the last mature sentence's word index
+            const lastMatureEndIndex = lastMature.endWordIndex;
+            
+            if (words.length > 0 && lastMatureEndIndex < words.length) {
+                // Extract live words from the word array
+                const liveWords = words.slice(lastMatureEndIndex + 1);
+                this.liveBufferText = liveWords.map(w => w.text).join(' ').trim();
+                this.lastFinalizedSentenceEnd = lastMatureEndIndex;
+            } else {
+                // Fallback: try to find the position in text
+                const matureText = sentenceResult.matureSentences.map(s => s.text).join(' ');
+                const livePortion = text.replace(matureText, '').trim();
+                this.liveBufferText = livePortion;
+            }
+        } else {
+            // No mature sentences yet - entire text is live
+            this.liveBufferText = text;
+            this.lastFinalizedSentenceEnd = -1;
+        }
+        
+        if (this.config.debug) {
+            console.log(`[DEBUG] updateLiveBuffer: liveBufferText="${this.liveBufferText}" lastFinalizedEnd=${this.lastFinalizedSentenceEnd}`);
+        }
     }
 
     /**
@@ -443,6 +487,13 @@ export class UtteranceBasedMerger {
                     matureSentences.push(matureSentence);
                     this.matureSentences.push(matureSentence);
                     this.stats.matureSentencesCreated++;
+                    
+                    // Update the live buffer reference point when sentences finalize
+                    this.lastFinalizedSentenceEnd = matureSentence.endWordIndex;
+                    if (this.config.debug) {
+                        console.log(`[DEBUG] Sentence finalized: "${matureSentence.text}" at word index ${matureSentence.endWordIndex}`);
+                        console.log(`[DEBUG] Total mature now: ${this.matureSentences.length}`);
+                    }
                     // Prune old mature sentences to bound memory
                     if (this.matureSentences.length > MAX_MATURE_SENTENCES) {
                         this.matureSentences = this.matureSentences.slice(-MAX_MATURE_SENTENCES);
@@ -524,30 +575,27 @@ export class UtteranceBasedMerger {
 
     /**
      * Get full accumulated transcription text.
+     * Uses live buffer to prevent duplicates: concatenates mature sentences + live text.
      */
     getFullText(): string {
         const matureText = this.getMatureText();
-        const currentText = this.getCurrentText();
+        const liveText = this.liveBufferText;
 
-        if (matureText && currentText.startsWith(matureText)) {
-            return currentText;
+        // Build full text by combining mature sentences (from array) + live buffer
+        // This prevents duplicates by using the tracked live portion only
+        if (matureText && liveText) {
+            return `${matureText} ${liveText}`.trim();
         }
-
-        return matureText ? `${matureText} ${currentText}`.trim() : currentText;
+        
+        return matureText || liveText || '';
     }
 
     /**
      * Get the immature text (text after mature cursor).
      */
     getImmatureText(): string {
-        const matureText = this.getMatureText();
-        const currentText = this.getCurrentText();
-
-        if (currentText.startsWith(matureText)) {
-            return currentText.substring(matureText.length).trim();
-        }
-
-        return currentText;
+        // Return the live buffer as the immature text
+        return this.liveBufferText || '';
     }
 
     /**
@@ -620,10 +668,18 @@ export class UtteranceBasedMerger {
             const matured: MergerSentence = { ...candidate, isMature: true };
             this.matureSentences.push(matured);
             this.stats.matureSentencesCreated++;
+            
+            // Update the live buffer reference point when sentence finalizes by timeout
+            this.lastFinalizedSentenceEnd = matured.endWordIndex;
+            if (this.config.debug) {
+                console.log(`[DEBUG] Timeout finalized: "${matured.text}" at word index ${matured.endWordIndex}`);
+                console.log(`[DEBUG] Total mature now: ${this.matureSentences.length}`);
+            }
             // Prune old mature sentences to bound memory
             if (this.matureSentences.length > MAX_MATURE_SENTENCES) {
                 this.matureSentences = this.matureSentences.slice(-MAX_MATURE_SENTENCES);
             }
+            // Advance cursor
             this.updateMatureCursor([matured], candidate.wordEndTime || 0);
             if (this.config.debug) {
                 console.log(
@@ -659,6 +715,9 @@ export class UtteranceBasedMerger {
         this.currentUtteranceText = '';
         this.matureCursorTime = 0;
         this.pendingSentence = null;
+        // Reset live buffer tracking
+        this.liveBufferText = '';
+        this.lastFinalizedSentenceEnd = -1;
         this.stats = {
             utterancesProcessed: 0,
             sentencesDetected: 0,
@@ -708,3 +767,6 @@ export class UtteranceBasedMerger {
         };
     }
 }
+
+
+export default UtteranceBasedMerger;
