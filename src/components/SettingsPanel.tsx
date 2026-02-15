@@ -224,39 +224,3 @@ export const SettingsContent: Component<SettingsContentProps> = (props) => {
     </div>
   );
 };
-          <Show when={isV3()}>
-            <div class="space-y-1.5 min-w-0">
-              <div class="flex justify-between items-center gap-2">
-                <span class="text-[10px] font-bold uppercase tracking-widest text-[var(--color-earthy-soft-brown)]">Window</span>
-                <span class="text-sm text-[var(--color-earthy-dark-brown)] tabular-nums shrink-0">{appStore.streamingWindow().toFixed(1)}s</span>
-              </div>
-              <input
-                type="range" min="2.0" max="15.0" step="0.5"
-                value={appStore.streamingWindow()}
-                onInput={(e) => appStore.setStreamingWindow(parseFloat(e.currentTarget.value))}
-                class="debug-slider w-full h-2 rounded-full appearance-none cursor-pointer bg-[var(--color-earthy-sage)]/30"
-              />
-            </div>
-          </Show>
-          </section>
-        </Show>
-
-        <Show when={showDebug()}>
-          <div class="pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                props.onOpenDebug();
-                props.onClose();
-              }}
-              class="flex items-center gap-2 px-0 py-2 text-sm font-medium text-[var(--color-earthy-muted-green)] hover:opacity-80 transition-opacity w-full"
-            >
-              <span class="material-symbols-outlined text-lg">bug_report</span>
-              Open Debug panel
-            </button>
-          </div>
-        </Show>
-      </div>
-    </div>
-  );
-};

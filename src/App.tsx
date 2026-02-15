@@ -1298,6 +1298,8 @@ const App: Component = () => {
         }
 
         const mode = appStore.transcriptionMode();
+        // v5 path was retired; keep startup on v4-only flow.
+        const isV5Mode = false;
 
         // v4 mode: always start audio capture, mel preprocessing, and VAD.
         // Inference starts when the model is ready.
