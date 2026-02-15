@@ -61,6 +61,7 @@ let twiddles: { cos: Float64Array; sin: Float64Array };
 // Logging throttle for getFeatures (avoid console spam)
 let lastGetFeaturesLogTime = 0;
 const GET_FEATURES_LOG_INTERVAL = 5000; // Log every 5 seconds max
+const MEL_WORKER_VERBOSE_LOGS = false;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Initialization
@@ -97,7 +98,9 @@ function init(config: { nMels?: number }) {
     totalSamples = 0;
 
     const melBufMB = (nMels * maxFrames * 4 / 1024 / 1024).toFixed(1);
-    console.log(`[MelWorker] Initialized: nMels=${nMels}, maxFrames=${maxFrames} (circular), ${melBufMB}MB mel buffer, preemph=${preemphBuffer.length} samples, init ${(performance.now() - t0).toFixed(1)} ms`);
+    if (MEL_WORKER_VERBOSE_LOGS) {
+        console.log(`[MelWorker] Initialized: nMels=${nMels}, maxFrames=${maxFrames} (circular), ${melBufMB}MB mel buffer, preemph=${preemphBuffer.length} samples, init ${(performance.now() - t0).toFixed(1)} ms`);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -188,7 +191,7 @@ function pushAudio(chunk: Float32Array) {
     if (newFramesComputed > 0) {
         const elapsed = performance.now() - t0;
         // Log every ~50 chunks (~4s) to avoid spam
-        if (computedFrames % 50 < newFramesComputed) {
+        if (MEL_WORKER_VERBOSE_LOGS && computedFrames % 50 < newFramesComputed) {
             console.log(`[MelWorker] pushAudio: +${chunkLen} samples, +${newFramesComputed} frames, total ${computedFrames} frames (${(totalSamples / 16000).toFixed(1)}s), buf [${baseFrame}..${computedFrames}), preemph ${preemphLen} samples, ${elapsed.toFixed(1)} ms`);
         }
     }
@@ -277,7 +280,7 @@ function getFeatures(startFrame: number, endFrame: number, normalize: boolean = 
 
     // Throttled logging to avoid console spam (was causing noticeable CPU overhead)
     const now = performance.now();
-    if (now - lastGetFeaturesLogTime > GET_FEATURES_LOG_INTERVAL) {
+    if (MEL_WORKER_VERBOSE_LOGS && now - lastGetFeaturesLogTime > GET_FEATURES_LOG_INTERVAL) {
         lastGetFeaturesLogTime = now;
         const elapsed = now - t0;
         console.log(`[MelWorker] getFeatures: frames ${sf}..${ef} (${T} frames, ${(T * HOP_LENGTH / 16000).toFixed(2)}s), normalize=${normalize}, ${elapsed.toFixed(1)} ms, buf [${baseFrame}..${computedFrames})`);
@@ -317,7 +320,9 @@ function reset() {
     totalSamples = 0;
     computedFrames = 0;
     baseFrame = 0;
-    console.log('[MelWorker] Reset');
+    if (MEL_WORKER_VERBOSE_LOGS) {
+        console.log('[MelWorker] Reset');
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -405,4 +410,6 @@ self.onmessage = (e: MessageEvent) => {
     }
 };
 
-console.log('[MelWorker] Worker script loaded');
+if (MEL_WORKER_VERBOSE_LOGS) {
+    console.log('[MelWorker] Worker script loaded');
+}

@@ -145,6 +145,20 @@ describe('WindowBuilder', () => {
             expect(win!.isInitial).toBe(true);
             expect(win!.startFrame).toBe(sampleRate * 2);
         });
+
+        it('never regresses behind ring base even with stale start hint', () => {
+            const ring = createMockRingBuffer(sampleRate * 10, sampleRate * 14);
+            const builder = new WindowBuilder(ring, null, {
+                sampleRate,
+                minInitialDurationSec: 1.0,
+                maxDurationSec: 30,
+                cursorPrerollSec: 0,
+            });
+
+            const win = builder.buildWindow(sampleRate * 4);
+            expect(win).not.toBeNull();
+            expect(win!.startFrame).toBe(sampleRate * 10);
+        });
     });
 
     describe('hasSpeechInPendingWindow', () => {

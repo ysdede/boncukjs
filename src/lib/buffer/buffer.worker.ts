@@ -59,9 +59,13 @@ class CircularLayer {
     /** Write a single entry (dimension values). */
     write(data: Float32Array | number[]): void {
         const writePos = (this.globalWriteIndex % this.maxEntries) * this.entryDimension;
-        for (let i = 0; i < this.entryDimension; i++) {
-            this.buffer[writePos + i] = (data as any)[i] ?? 0;
+        if (this.entryDimension === 1) {
+            this.buffer[writePos] = (data as any)[0] ?? 0;
+            this.globalWriteIndex++;
+            return;
         }
+        const src = data instanceof Float32Array ? data : Float32Array.from(data);
+        this.buffer.set(src.subarray(0, this.entryDimension), writePos);
         this.globalWriteIndex++;
     }
 
@@ -71,9 +75,7 @@ class CircularLayer {
         for (let e = 0; e < n; e++) {
             const writePos = (this.globalWriteIndex % this.maxEntries) * this.entryDimension;
             const srcOffset = e * this.entryDimension;
-            for (let d = 0; d < this.entryDimension; d++) {
-                this.buffer[writePos + d] = data[srcOffset + d] ?? 0;
-            }
+            this.buffer.set(data.subarray(srcOffset, srcOffset + this.entryDimension), writePos);
             this.globalWriteIndex++;
         }
     }
@@ -132,8 +134,10 @@ class CircularLayer {
         for (let i = 0; i < count; i++) {
             const readPos = ((clampStart + i) % this.maxEntries) * this.entryDimension;
             const dstPos = i * this.entryDimension;
-            for (let d = 0; d < this.entryDimension; d++) {
-                result[dstPos + d] = this.buffer[readPos + d];
+            if (this.entryDimension === 1) {
+                result[dstPos] = this.buffer[readPos];
+            } else {
+                result.set(this.buffer.subarray(readPos, readPos + this.entryDimension), dstPos);
             }
         }
 
