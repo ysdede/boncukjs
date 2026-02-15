@@ -1308,12 +1308,10 @@ const App: Component = () => {
           // Reset v4 sample/inference counters
           v4GlobalSampleOffset = 0;
           v4LastGateChunkSample = 0;
-          v4LastInferenceEndSample = 0;
           lastWordEndTime = 0;
           lastImmatureText = '';
           justFinalizedByTimeout = false;
           v4StateEpoch = 0;
-          v4LastIdleGateProbeTime = 0;
 
           // Feed audio chunks to mel worker from the main audio handler below
           v4MelChunkUnsubscribe = null;
@@ -1514,7 +1512,8 @@ const App: Component = () => {
           appStore.setBarLevels(audioEngine!.getBarLevels());
         });
       } catch (err: any) {
-        appStore.setErrorMessage(err.message);
+        console.error('[App] Failed to start recording:', err);
+        appStore.setErrorMessage(err?.message ?? String(err));
       }
     }
   };
