@@ -10,6 +10,7 @@ Analyzes Chrome performance traces for:
 - WASM compilation overhead
 - Worker message passing overhead
 - Frame rate and rendering analysis
+- 30s window CPU trends (main/compositor/workers)
 - JS function call hotspots
 
 Usage:
@@ -444,6 +445,102 @@ def analyze_frames(events, pid, compositor_tid):
     }
 
 
+def analyze_cpu_trends(events, renderer_pid, ids, window_seconds=30):
+    """Compute CPU activity trends in fixed-size windows for renderer threads."""
+    if renderer_pid is None:
+        return {"window_seconds": window_seconds, "windows": [], "trend": {}}
+
+    thread_map = {}
+    if ids.get("main_tid") is not None:
+        thread_map[ids["main_tid"]] = "Main Thread"
+    if ids.get("compositor_tid") is not None:
+        thread_map[ids["compositor_tid"]] = "Compositor"
+    if ids.get("audio_worklet_tid") is not None:
+        thread_map[ids["audio_worklet_tid"]] = "AudioWorklet"
+    for tid in ids.get("worker_tids", []):
+        thread_map[tid] = f"Worker-{tid}"
+
+    relevant = [
+        e for e in events
+        if e.get("pid") == renderer_pid
+        and e.get("ph") == "X"
+        and e.get("tid") in thread_map
+        and e.get("dur", 0) > 0
+        and e.get("ts") is not None
+    ]
+    if not relevant:
+        return {"window_seconds": window_seconds, "windows": [], "trend": {}}
+
+    min_ts = min(e["ts"] for e in relevant)
+    max_ts = max(e["ts"] + e.get("dur", 0) for e in relevant)
+    window_us = int(window_seconds * 1_000_000)
+    if max_ts <= min_ts or window_us <= 0:
+        return {"window_seconds": window_seconds, "windows": [], "trend": {}}
+
+    window_count = int((max_ts - min_ts + window_us - 1) // window_us)
+    labels = list(thread_map.values())
+    by_thread = {label: [0.0] * window_count for label in labels}
+
+    for e in relevant:
+        tid = e["tid"]
+        label = thread_map.get(tid)
+        if label is None:
+            continue
+
+        start_ts = e["ts"]
+        end_ts = start_ts + e.get("dur", 0)
+        cursor = start_ts
+        while cursor < end_ts:
+            win_idx = int((cursor - min_ts) // window_us)
+            if win_idx < 0 or win_idx >= window_count:
+                break
+            win_start = min_ts + (win_idx * window_us)
+            win_end = win_start + window_us
+            slice_end = min(end_ts, win_end)
+            overlap_us = max(0, slice_end - cursor)
+            by_thread[label][win_idx] += overlap_us / 1000.0
+            cursor = slice_end
+
+    windows = []
+    for idx in range(window_count):
+        start_s = (idx * window_seconds)
+        end_s = start_s + window_seconds
+        thread_ms = {label: round(by_thread[label][idx], 1) for label in labels}
+        total_ms = round(sum(thread_ms.values()), 1)
+        windows.append({
+            "index": idx,
+            "start_s": round(start_s, 1),
+            "end_s": round(end_s, 1),
+            "thread_ms": thread_ms,
+            "total_ms": total_ms,
+        })
+
+    trend = {}
+    for label in labels:
+        series = by_thread[label]
+        if not series:
+            continue
+        first = series[0]
+        last = series[-1]
+        delta = last - first
+        slope = delta / max(1, len(series) - 1)
+        direction = "up" if slope > 25 else "down" if slope < -25 else "flat"
+        trend[label] = {
+            "first_window_ms": round(first, 1),
+            "last_window_ms": round(last, 1),
+            "delta_ms": round(delta, 1),
+            "slope_ms_per_window": round(slope, 1),
+            "direction": direction,
+        }
+
+    return {
+        "window_seconds": window_seconds,
+        "window_count": window_count,
+        "windows": windows,
+        "trend": trend,
+    }
+
+
 def print_report(summary):
     """Print a human-readable report from the summary dict."""
     s = summary
@@ -466,6 +563,20 @@ def print_report(summary):
     print("\n--- Thread CPU Time ---")
     for info in s["thread_activity"]:
         print(f"  {info['label']:40s}: {info['total_dur_ms']:8.1f}ms")
+
+    cpu_trends = s.get("cpu_trends_30s", {})
+    trend_windows = cpu_trends.get("windows", [])
+    if trend_windows:
+        print("\n--- CPU Trends (30s windows) ---")
+        for w in trend_windows:
+            print(f"  Window {w['index']:>2} [{w['start_s']:>5.1f}s..{w['end_s']:>5.1f}s] total={w['total_ms']:8.1f}ms")
+
+        for label, t in cpu_trends.get("trend", {}).items():
+            print(
+                f"    {label:20s} {t['direction']:>4s}  "
+                f"{t['first_window_ms']:7.1f}ms -> {t['last_window_ms']:7.1f}ms  "
+                f"(delta {t['delta_ms']:+7.1f}ms)"
+            )
 
     # Main thread
     mt = s["main_thread"]
@@ -598,6 +709,9 @@ def main():
     print("Analyzing frames...")
     frames = analyze_frames(events, rpid, ctid) if ctid else {"draw_count": 0}
 
+    print("Analyzing CPU trends...")
+    cpu_trends_30s = analyze_cpu_trends(events, rpid, ids, window_seconds=30)
+
     print("Analyzing WASM...")
     wasm = analyze_wasm(events)
 
@@ -630,6 +744,7 @@ def main():
         "webgpu": webgpu,
         "audioworklet": audioworklet,
         "frames": frames,
+        "cpu_trends_30s": cpu_trends_30s,
         "wasm": wasm,
         "message_passing": msg,
     }
