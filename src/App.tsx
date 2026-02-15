@@ -237,6 +237,36 @@ const refineCursorByVadMinProb = async (
     return { refinedSec: candidateCursorSec, source: 'none', minProb: Number.NaN, baseProb: Number.NaN };
   }
 };
+
+const stripConfirmedOverlapFromLive = (matureText: string, liveText: string): string => {
+  const mature = (matureText || '').trim();
+  const live = (liveText || '').trim();
+  if (!live || !mature) return live;
+
+  if (live.startsWith(mature)) {
+    return live.slice(mature.length).trim();
+  }
+
+  const matureWords = mature.split(/\s+/).filter(Boolean);
+  const liveWords = live.split(/\s+/).filter(Boolean);
+  const maxOverlap = Math.min(matureWords.length, liveWords.length);
+
+  // Remove only meaningful overlap to avoid erasing legitimate repeated short phrases.
+  for (let k = maxOverlap; k >= 3; k--) {
+    let same = true;
+    for (let i = 0; i < k; i++) {
+      if (matureWords[matureWords.length - k + i] !== liveWords[i]) {
+        same = false;
+        break;
+      }
+    }
+    if (same) {
+      return liveWords.slice(k).join(' ').trim();
+    }
+  }
+
+  return live;
+};
 // Throttle UI updates from TEN-VAD to at most once per frame
 let pendingSileroProb: number | null = null;
 let sileroUpdateScheduled = false;
@@ -350,11 +380,13 @@ const applyV5StateToStore = (state: StreamStateResult | null | undefined) => {
   }));
 
   // Legacy adapter fields for migration compatibility
-  appStore.setMatureText(state.stableText || '');
-  appStore.setImmatureText(state.draftText || '');
+  const stableText = state.stableText || '';
+  const draftText = stripConfirmedOverlapFromLive(stableText, state.draftText || '');
+  appStore.setMatureText(stableText);
+  appStore.setImmatureText(draftText);
   appStore.setMatureCursorTime(state.commitCursorTime || 0);
   appStore.setTranscript(state.fullText || '');
-  appStore.setPendingText(state.draftText || '');
+  appStore.setPendingText(draftText);
 };
 
 const Header: Component<{
@@ -644,7 +676,10 @@ const App: Component = () => {
       try {
         const flushResult = await workerClient.v4FinalizeTimeout();
         if (flushResult) {
-          const remainingImmature = flushResult.immatureText || '';
+          const remainingImmature = stripConfirmedOverlapFromLive(
+            flushResult.matureText || '',
+            flushResult.immatureText || '',
+          );
           v4StateEpoch++;
           appStore.setMatureText(flushResult.matureText);
           appStore.setImmatureText(remainingImmature);
@@ -690,7 +725,10 @@ const App: Component = () => {
       try {
         const flushResult = await workerClient.v4FinalizeTimeout();
         if (flushResult) {
-          const remainingImmature = flushResult.immatureText || '';
+          const remainingImmature = stripConfirmedOverlapFromLive(
+            flushResult.matureText || '',
+            flushResult.immatureText || '',
+          );
           v4StateEpoch++;
           appStore.setMatureText(flushResult.matureText);
           appStore.setImmatureText(remainingImmature);
@@ -803,16 +841,20 @@ const App: Component = () => {
       }
 
       // Update UI state
+      const sanitizedImmature = stripConfirmedOverlapFromLive(
+        result.matureText || '',
+        result.immatureText || '',
+      );
       appStore.setMatureText(result.matureText);
-      appStore.setImmatureText(result.immatureText);
+      appStore.setImmatureText(sanitizedImmature);
       appStore.setTranscript(result.fullText);
-      appStore.setPendingText(result.immatureText);
+      appStore.setPendingText(sanitizedImmature);
       appStore.setInferenceLatency(inferenceMs);
 
       // Track when we receive new pending words for timeout-based finalization.
-      if (result.immatureText !== lastImmatureText && result.immatureText.length > 0) {
+      if (sanitizedImmature !== lastImmatureText && sanitizedImmature.length > 0) {
         lastWordEndTime = performance.now();
-        lastImmatureText = result.immatureText;
+        lastImmatureText = sanitizedImmature;
       }
 
       if (result.debug && (appStore.showDebugPanel() || v4TickCount <= 10 || v4TickCount % 12 === 0)) {
