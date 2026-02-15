@@ -142,7 +142,26 @@ export class TenVADWorkerClient {
     private sendRequest(type: string, payload: any): Promise<any> {
         return new Promise((resolve, reject) => {
             const id = ++this.messageId;
-            this.pendingPromises.set(id, { resolve, reject });
+
+            // 5-second timeout to handle worker unresponsiveness or init failures
+            const timeoutId = setTimeout(() => {
+                if (this.pendingPromises.has(id)) {
+                    this.pendingPromises.delete(id);
+                    reject(new Error(`TenVAD request ${type} timed out`));
+                }
+            }, 5000);
+
+            this.pendingPromises.set(id, {
+                resolve: (val) => {
+                    clearTimeout(timeoutId);
+                    resolve(val);
+                },
+                reject: (err) => {
+                    clearTimeout(timeoutId);
+                    reject(err);
+                },
+            });
+
             this.worker.postMessage({ type, payload, id });
         });
     }
