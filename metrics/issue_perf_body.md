@@ -1,30 +1,51 @@
-# Performance Trace Findings (90s session)
+# Performance Issue: Sustained CPU Usage After Brief Activity
 
-## Summary
-The trace shows GPU/WebGPU work dominating timed events, with renderer main and AudioWorklet threads staying under jank thresholds. The biggest optimization wins are in reducing WebGPU command submission/flush overhead, improving buffer reuse, and cutting per‑chunk allocations in workers.
+## Problem Statement
+The app CPU does not settle down quickly after a few seconds of activity. Trace evidence suggests a sustained baseline workload rather than one-time spikes.
 
-## Key Findings
-- WebGPU/GPU-related work is the dominant consumer of timed events in the trace (`GpuChannel::ExecuteDeferredRequest`, `CommandBuffer::Flush`, `CommandBufferStub::OnAsyncFlush`, `CommandBufferService:PutChanged`, `WebGPU`).
-- Renderer main thread has no >16ms tasks; layout/paint is present but below jank thresholds.
-- AudioWorklet thread shows many events but no long tasks (no ≥2ms events), suggesting realtime audio capture is stable.
-- The only >50ms tasks were browser background tasks (sync scheduler / geolocation polling), not app code.
+## Evidence from Current Trace (93.4s)
+- Main render loop remains active at high frequency:
+  - `ProxyMain::BeginMainFrame`: 1,646 calls
+  - `PageAnimator::serviceScriptedAnimations`: 1,646 calls
+- Repeated synchronous style/layout work:
+  - Forced style+layout: 8,248 calls
+- Worker pipelines continue periodic processing:
+  - Mel worker: 385 calls
+  - Buffer worker: 417 calls
+- GPU/inference worker shows allocation pressure:
+  - GC is 28.7% of worker CPU time
+- GPU command churn is high even with low inference cadence:
+  - 3,315+ commands
+  - 117 commands >5ms
 
-## Optimization Suggestions
-### WebGPU
-- Reduce `queue.submit` frequency by batching multiple passes into a single command buffer.
-- Reuse `GPUBuffer`s and staging buffers; avoid frequent reallocation.
-- Prefer `queue.writeBuffer` for small updates instead of `mapAsync`/readback in hot paths.
-- Keep pipeline and bind group layouts stable; avoid per‑frame layout churn.
+## Root-Cause Hypothesis
+Sustained CPU is primarily caused by always-on periodic loops (UI frame callbacks + worker ticks + GPU command churn) that continue even when useful work is low.
 
-### Worker/JS
-- Reduce per‑chunk object churn to lower GC activity (reuse `Float32Array` buffers, avoid allocating new objects per chunk).
-- Ensure any heavy computations stay off the main thread.
+## Optimization Plan (Prioritized)
+### P0: Reduce baseline activity when idle
+- Gate waveform/UI updates by real data changes.
+- Pause or downshift render/update loops in low/no-signal state.
+- Stop non-essential visual updates when tab is hidden.
 
-### UI
-- Keep waveform/UI refresh throttled (e.g., 30fps) and skip updates when backgrounded.
+### P0: Make worker processing event-driven
+- Avoid fixed-interval polling loops when ring buffer/input has insufficient data.
+- Introduce explicit worker states (`active`, `cooldown`, `idle`).
+- Wake workers on threshold crossing instead of constant ticks.
 
-## Next Steps
-- Prioritize WebGPU batching + buffer reuse in the inference/render pipeline.
-- Audit worker hot paths for allocations per chunk.
+### P1: Lower GC and GPU command overhead
+- Reuse typed arrays and inference buffers.
+- Reuse ONNX Runtime input/output wrappers where possible.
+- Batch command submission and reduce command buffer flush frequency.
 
-Sign: G52CEH
+### P1: Reduce layout overhead
+- Split DOM reads/writes per frame.
+- Avoid geometry reads inside hot reactive paths.
+- Batch worker-to-UI updates.
+
+## Acceptance Criteria
+Validate in a 5-10 minute trace with idle/active phases:
+1. Main-thread CPU share reduced by >=25%.
+2. Forced style/layout count per minute reduced by >=50%.
+3. GPU worker GC share reduced from 28.7% to <15%.
+4. WebGPU >5ms commands reduced by >=30%.
+5. CPU shows clear drop during idle windows (no sustained elevated baseline).

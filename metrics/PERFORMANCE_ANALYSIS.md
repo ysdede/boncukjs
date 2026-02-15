@@ -191,6 +191,106 @@ The max frame interval of 485.7ms indicates at least one significant stall. Aver
 
 ---
 
+## CPU Growth Interpretation (User Symptom: "CPU stays high after a few seconds")
+
+The trace indicates sustained periodic work, not only isolated spikes. This can keep CPU elevated even when the app looks idle.
+
+Evidence from this capture:
+
+- Main render loop activity is persistent: `BeginMainFrame` 1,646x and `PageAnimator::serviceScriptedAnimations` 1,646x
+- Forced style/layout appears repeatedly: 8,248 sync style+layout updates
+- Worker loops keep ticking: Mel worker 385 calls, Buffer worker 417 calls
+- Inference cadence is low (34 calls), but GPU command churn remains high (3,315+ commands) with frequent flushes
+- GPU worker JS time is heavily affected by GC (28.7% on tid=75196)
+
+This pattern matches a "high baseline CPU" failure mode:
+
+1. UI animation/update loop continues even when no meaningful visual change is needed.
+2. Worker pipelines keep processing on fixed intervals instead of event-driven gating.
+3. GPU/JS allocation churn creates recurring GC overhead.
+
+Important limitation:
+
+- This 93.4s trace is enough to prove sustained background load, but not enough to prove monotonic CPU ramp over long sessions. A longer capture is required for slope validation.
+
+---
+
+## Optimization Plan for Sustained CPU
+
+### P0 - Stop unnecessary steady-state work
+
+1. Gate UI render loop by actual state changes.
+2. Pause or downshift waveform updates when no new audio/token data arrives.
+3. On hidden tabs, pause non-essential animation and reduce update rate.
+
+Expected impact:
+
+- Lower main thread baseline CPU.
+- Fewer forced style/layout calls.
+
+### P0 - Gate worker pipelines by signal, not timer
+
+1. Buffer/Mel worker cycles should sleep when ring buffer is below minimum data threshold.
+2. Resume immediately when enough samples are available.
+3. Add explicit idle states (`active`, `cooldown`, `idle`) to avoid spin behavior.
+
+Expected impact:
+
+- CPU should drop quickly after brief speech/activity bursts.
+- Lower worker thread active time in steady state.
+
+### P1 - Reduce GPU worker allocation churn
+
+1. Reuse typed arrays and staging buffers in inference path.
+2. Reuse ONNX input/output wrappers where possible.
+3. Minimize per-inference object creation and transient command objects.
+
+Expected impact:
+
+- Lower GC share on GPU worker.
+- Smoother latency (better p95/p99) and lower CPU variance.
+
+### P1 - Reduce forced layout risk in reactive UI
+
+1. Separate DOM reads from writes in frame callbacks.
+2. Avoid reading geometry in hot loops.
+3. Batch UI updates from worker messages.
+
+Expected impact:
+
+- Reduced style/layout recalculation overhead.
+- Lower jank risk during long sessions.
+
+---
+
+## Acceptance Criteria (Next Trace)
+
+After applying optimizations, verify all below in a new 5-10 minute trace:
+
+1. Main thread total CPU share decreases by at least 25% from current baseline.
+2. Forced style/layout call count per minute decreases by at least 50%.
+3. Worker idle windows show clear drop in worker activity (no constant periodic churn).
+4. GPU worker GC time share drops from 28.7% to below 15%.
+5. WebGPU commands >5ms reduce by at least 30%.
+6. No regression in transcription latency or UI responsiveness.
+
+---
+
+## Next Trace Protocol (to confirm CPU creep vs. steady baseline)
+
+1. Capture at least 5 minutes total:
+   - 60s warm-up
+   - 60s active speech
+   - 120s low/no speech idle
+   - 60s active speech again
+2. Keep one run foreground, one run backgrounded tab.
+3. Report per-window (30s) CPU time for main/compositor/workers and compare window-to-window slope.
+4. Track p50/p95/p99 for frame interval and WebGPU command duration, not only averages.
+
+This protocol separates true "CPU growth over time" from "constant high baseline CPU."
+
+---
+
 ## How to Re-run Analysis
 
 ```bash
