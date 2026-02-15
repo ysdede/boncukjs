@@ -59,9 +59,13 @@ class CircularLayer {
     /** Write a single entry (dimension values). */
     write(data: Float32Array | number[]): void {
         const writePos = (this.globalWriteIndex % this.maxEntries) * this.entryDimension;
-        for (let i = 0; i < this.entryDimension; i++) {
-            this.buffer[writePos + i] = (data as any)[i] ?? 0;
+        if (this.entryDimension === 1) {
+            this.buffer[writePos] = (data as any)[0] ?? 0;
+            this.globalWriteIndex++;
+            return;
         }
+        const src = data instanceof Float32Array ? data : Float32Array.from(data);
+        this.buffer.set(src.subarray(0, this.entryDimension), writePos);
         this.globalWriteIndex++;
     }
 
