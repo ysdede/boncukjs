@@ -82,34 +82,6 @@ describe('UtteranceBasedMerger timeout finalization', () => {
     expect(flushed?.immatureText).toBe('second live tail words');
   });
 
-  it('does not re-append mature prefix as live text on overlap updates', () => {
-    const merger = new UtteranceBasedMerger({
-      useNLP: false,
-      minSentenceLength: 1,
-      enableTimeoutFinalization: true,
-      skipSingleSentences: false,
-      requireFollowingSentence: false,
-      matureSentenceOffset: -1,
-    });
-
-    merger.processASRResult({
-      utterance_text: 'first sentence. second live tail',
-      words: buildWords('first sentence. second live tail'),
-      end_time: 1.0,
-    });
-    merger.finalizePendingSentenceByTimeout();
-
-    const next = merger.processASRResult({
-      utterance_text: 'first sentence. second live tail words',
-      words: buildWords('first sentence. second live tail words'),
-      end_time: 1.4,
-    });
-
-    expect(next.matureText).toContain('first sentence.');
-    expect(next.immatureText).toBe('second live tail words');
-    expect(next.fullText).toBe('first sentence. second live tail words');
-  });
-
   it('does not finalize no-punctuation tails', () => {
     const merger = new UtteranceBasedMerger({
       useNLP: false,

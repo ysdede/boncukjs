@@ -155,7 +155,7 @@ export class UtteranceBasedMerger {
     // Live buffer tracking to prevent duplicates during sentence finalization
     // This tracks ONLY the unfinalized portion of text that should be appended to mature sentences
     private liveBufferText: string = '';
-    private lastFinalizedSentenceEnd: number = -1;
+    private lastFinalizedSentenceEnd: number = 0;
     private lastDebugSnapshot: MergerDebugSnapshot | null = null;
 
     // Statistics
@@ -317,49 +317,33 @@ export class UtteranceBasedMerger {
     private updateLiveBuffer(utterance: Utterance, sentenceResult: SentenceDetectionResult): void {
         const { text, words } = utterance;
         
-        // If this chunk finalized sentence(s), advance finalized cutoff.
+        // If we have mature sentences, the live portion is what comes after the last mature sentence
         if (sentenceResult.matureSentences.length > 0) {
             const lastMature = sentenceResult.matureSentences[sentenceResult.matureSentences.length - 1];
-            this.lastFinalizedSentenceEnd = Math.max(this.lastFinalizedSentenceEnd, lastMature.endWordIndex);
+            
+            // The live portion starts after the last mature sentence's word index
+            const lastMatureEndIndex = lastMature.endWordIndex;
+            
+            if (words.length > 0 && lastMatureEndIndex < words.length) {
+                // Extract live words from the word array
+                const liveWords = words.slice(lastMatureEndIndex + 1);
+                this.liveBufferText = liveWords.map(w => w.text).join(' ').trim();
+                this.lastFinalizedSentenceEnd = lastMatureEndIndex;
+            } else {
+                // Fallback: try to find the position in text
+                const matureText = sentenceResult.matureSentences.map(s => s.text).join(' ');
+                const livePortion = text.replace(matureText, '').trim();
+                this.liveBufferText = livePortion;
+            }
+        } else {
+            // No mature sentences yet - entire text is live
+            this.liveBufferText = text;
+            this.lastFinalizedSentenceEnd = -1;
         }
-
-        this.liveBufferText = this.extractLiveText(text, words, this.lastFinalizedSentenceEnd);
         
         if (this.config.debug) {
             console.log(`[DEBUG] updateLiveBuffer: liveBufferText="${this.liveBufferText}" lastFinalizedEnd=${this.lastFinalizedSentenceEnd}`);
         }
-    }
-
-    /**
-     * Extract only the non-finalized tail ("live" text) for current utterance text.
-     * Prevents mature text from being briefly re-appended as live during overlap updates.
-     */
-    private extractLiveText(text: string, words: DetectorWord[], finalizedWordIndex: number): string {
-        if (words.length > 0 && finalizedWordIndex >= 0) {
-            if (finalizedWordIndex >= words.length - 1) {
-                return '';
-            }
-            const liveWords = words.slice(finalizedWordIndex + 1);
-            return liveWords.map((w) => w.text).join(' ').trim();
-        }
-
-        const matureText = this.getMatureText();
-        if (!matureText) {
-            return text.trim();
-        }
-
-        // Strong path: remove only leading mature prefix, not all occurrences.
-        if (text.startsWith(matureText)) {
-            return text.slice(matureText.length).trim();
-        }
-
-        const normalizedText = text.replace(/\s+/g, ' ').trim();
-        const normalizedMature = matureText.replace(/\s+/g, ' ').trim();
-        if (normalizedText.startsWith(normalizedMature)) {
-            return normalizedText.slice(normalizedMature.length).trim();
-        }
-
-        return text.trim();
     }
 
     /**
